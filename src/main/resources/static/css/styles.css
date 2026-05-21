@@ -1,0 +1,276 @@
+:root {
+    color-scheme: light;
+    --ink: #27211d;
+    --muted: #6d625a;
+    --line: #ded4ca;
+    --paper: #fffaf4;
+    --panel: #ffffff;
+    --accent: #a64f2a;
+    --accent-dark: #783618;
+    --soft: #f4e6d8;
+    --danger: #b42318;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+}
+
+.topbar {
+    min-height: 220px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 38px clamp(18px, 5vw, 70px);
+    color: #fff;
+    background: linear-gradient(rgba(39, 33, 29, .54), rgba(39, 33, 29, .68)),
+        url("https://images.unsplash.com/photo-1486427944299-d1955d23e34d?auto=format&fit=crop&w=1600&q=80") center/cover;
+}
+
+.topbar.compact {
+    min-height: 150px;
+}
+
+.eyebrow {
+    margin: 0 0 8px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-weight: 700;
+}
+
+h1, h2, h3, p {
+    margin-top: 0;
+}
+
+h1 {
+    max-width: 850px;
+    margin-bottom: 0;
+    font-size: clamp(32px, 5vw, 58px);
+    line-height: 1.05;
+    letter-spacing: 0;
+}
+
+.shell {
+    width: min(1180px, calc(100% - 32px));
+    margin: 28px auto 56px;
+}
+
+.summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 22px;
+}
+
+.summary h2 {
+    margin-bottom: 6px;
+}
+
+.module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.module-card {
+    display: grid;
+    gap: 18px;
+    padding: 20px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(39, 33, 29, .07);
+}
+
+.module-card h3 {
+    margin-bottom: 6px;
+    font-size: 22px;
+}
+
+.student {
+    display: inline-block;
+    margin-bottom: 8px;
+    color: var(--accent-dark);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+dl div, .operations div {
+    display: grid;
+    gap: 2px;
+    padding: 10px;
+    background: var(--soft);
+    border-radius: 6px;
+}
+
+dt, .operations strong {
+    color: var(--accent-dark);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+dd {
+    margin: 0;
+}
+
+.button, .small-button, .danger-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.button {
+    color: #fff;
+    background: var(--accent);
+}
+
+.button:hover {
+    background: var(--accent-dark);
+}
+
+.small-button {
+    color: var(--accent-dark);
+    background: var(--soft);
+}
+
+.danger-button {
+    color: #fff;
+    background: var(--danger);
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: #fff;
+    font-weight: 700;
+}
+
+.operations {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.search {
+    width: calc(100% - 24px);
+    min-height: 44px;
+    margin: 12px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+}
+
+table {
+    width: 100%;
+    min-width: 820px;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 13px 12px;
+    border-top: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: #f7efe7;
+    color: var(--accent-dark);
+    font-size: 13px;
+}
+
+.actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.actions form {
+    margin: 0;
+}
+
+.empty {
+    text-align: center;
+    color: var(--muted);
+}
+
+.form-shell {
+    max-width: 760px;
+}
+
+.record-form {
+    display: grid;
+    gap: 16px;
+    padding: 22px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+label {
+    display: grid;
+    gap: 7px;
+    font-weight: 700;
+}
+
+input, textarea {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+}
+
+textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+@media (max-width: 720px) {
+    .topbar {
+        display: grid;
+        min-height: 190px;
+        padding: 28px 18px;
+    }
+
+    h1 {
+        font-size: 34px;
+    }
+}
