@@ -1,4 +1,4 @@
-<DOCTYPE html>
+<!DOCTYPE html>
     <html lang="en" xmlns:th="http://www.thymeleaf.org">
     <head>
         <meta charset="UTF-8">
@@ -7,6 +7,77 @@
         <link rel="stylesheet" th:href="@{/css/styles.css}">
     </head>
     <body>
+        <header class="topbar compact">
+            <div>
+                <a class="back-link" th:href="@{/modules/{key}(key=${module.key})}">Back to records</a>
+                <p class="eyebrow" th:text="${module.title}">Module</p>
+                <h1 th:text="${mode == 'create' ? 'Add New Record' : 'Edit Record'}">Form</h1>
+            </div>
+        </header>
 
+    <main class="shell form-shell">
+        <form class="record-form" th:action="@{/modules/{key}(key=${module.key})}" method="post">
+            <input type="hidden" name="id" th:value="${record.id}">
+            <label th:each="field : ${module.fields}">
+                <span th:text="${field.label}">Field</span>
+                <select th:if="${field.name == 'orderStatus'}" th:name="${field.name}" required>
+                    <option value="Processing" th:selected="${field.value(record) == 'Processing'}">Processing</option>
+                    <option value="Canceled" th:selected="${field.value(record) == 'Canceled'}">Canceled</option>
+                </select>
+                <select th:if="${field.name == 'paymentStatus'}" th:name="${field.name}" required>
+                    <option value="Paid" th:selected="${field.value(record) == 'Paid'}">Paid</option>
+                    <option value="Refund" th:selected="${field.value(record) == 'Refund' || field.value(record) == 'Refunded'}">Refund</option>
+                    <option value="Pending Approval" th:selected="${field.value(record) == 'Pending Approval' || field.value(record) == 'Pending' || field.value(record) == 'Unpaid'}">Pending Approval</option>
+                </select>
+                <select th:if="${field.name == 'bookingStatus'}" th:name="${field.name}" required>
+                    <option value="Pending" th:selected="${field.value(record) == 'Pending'}">Pending</option>
+                    <option value="Confirmed" th:selected="${field.value(record) == 'Confirmed'}">Confirmed</option>
+                    <option value="Completed" th:selected="${field.value(record) == 'Completed'}">Completed</option>
+                </select>
+                <select th:if="${field.name == 'accountStatus'}" th:name="${field.name}" required>
+                    <option value="Active" th:selected="${field.value(record) == 'Active'}">Active</option>
+                    <option value="Inactive" th:selected="${field.value(record) == 'Inactive'}">Inactive</option>
+                    <option value="Expired" th:selected="${field.value(record) == 'Expired'}">Expired</option>
+                </select>
+                <textarea th:if="${field.name == 'comment' || field.name == 'details' || field.name == 'orderedItems' || field.name == 'designDetails'}"
+                          th:name="${field.name}"
+                          th:text="${field.value(record)}"
+                          required></textarea>
+                <input th:if="${field.name == 'totalAmount'}"
+                       th:name="${field.name}"
+                       th:value="${field.value(record)}"
+                       readonly
+                       data-total-amount
+                       required>
+                <input th:if="${field.name == 'stockAmount'}"
+                       type="number"
+                       min="0"
+                       th:name="${field.name}"
+                       th:value="${field.value(record)}"
+                       required>
+                <input th:unless="${field.name == 'comment' || field.name == 'details' || field.name == 'orderedItems' || field.name == 'designDetails' || field.name == 'totalAmount' || field.name == 'stockAmount' || field.name == 'orderStatus' || field.name == 'paymentStatus' || field.name == 'bookingStatus' || field.name == 'accountStatus'}"
+                       th:name="${field.name}"
+                       th:value="${field.value(record)}"
+                       th:required="${field.name != 'temporaryPassword'}">
+            </label>
+            <div class="form-actions">
+                <button class="button" type="submit">Save</button>
+                <a class="small-button" th:href="@{/modules/{key}(key=${module.key})}">Cancel</a>
+            </div>
+        </form>
+    </main>
+        <script>
+            function syncTotalAmount() {
+                const item = document.querySelector('[name="orderedItems"]');
+                const total = document.querySelector('[data-total-amount]');
+                if (!item || !total) return;
+                const matches = item.value.match(/\d+(?:\.\d{1,2})?/g);
+                total.value = matches && matches.length ? matches[matches.length - 1] : total.value || '0';
+            }
+            document.addEventListener('input', event => {
+                if (event.target.matches('[name="orderedItems"]')) syncTotalAmount();
+            });
+            document.addEventListener('DOMContentLoaded', syncTotalAmount);
+        </script>
     </body>
     </html>
