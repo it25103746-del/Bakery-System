@@ -11,3 +11,12 @@ public class CustomCakeBooking extends BakeryRecord {
 
     public CustomCakeBooking() {
 }
+
+    public CustomCakeBooking(String id, String customerName, String cakeSize, String designDetails, String pickupDate, String bookingStatus) {
+        super(id);
+        this.customerName = customerName;
+        this.cakeSize = cakeSize;
+        this.designDetails = designDetails;
+        this.pickupDate = pickupDate;
+        this.bookingStatus = bookingStatus;
+    }
