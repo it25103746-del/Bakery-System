@@ -22,5 +22,10 @@ public class Feedback extends BakeryRecord {
         return customerName + " - " + rating + "/5";
     }
 
+    @Override
+    public List<String> toFileFields() {
+        return List.of(customerName, rating, comment);
+    }
+
 
 }
