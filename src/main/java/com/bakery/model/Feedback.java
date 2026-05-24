@@ -1,4 +1,4 @@
 package com.bakery.model;
 
-public class Feedback {
+public class Feedback  extends BakeryRecord {
 }
