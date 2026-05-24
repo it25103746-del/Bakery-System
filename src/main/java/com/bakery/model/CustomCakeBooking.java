@@ -39,3 +39,4 @@ public class CustomCakeBooking extends BakeryRecord {
         bookingStatus = fields.get(4);
     }
     public String getCustomerName() { return customerName; }
+]
