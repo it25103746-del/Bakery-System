@@ -20,3 +20,12 @@ public class CustomCakeBooking extends BakeryRecord {
         this.pickupDate = pickupDate;
         this.bookingStatus = bookingStatus;
     }
+    @Override
+    public String getDisplayName() {
+        return customerName + " - " + cakeSize;
+    }
+
+    @Override
+    public List<String> toFileFields() {
+        return List.of(customerName, cakeSize, designDetails, pickupDate, bookingStatus);
+    }
