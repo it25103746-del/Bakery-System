@@ -8,4 +8,12 @@ public class Feedback extends BakeryRecord {
 
     public Feedback() {
     }
+
+    public Feedback(String id, String customerName, String rating, String comment, String moderationStatus) {
+        super(id);
+        this.customerName = customerName;
+        this.rating = rating;
+        this.comment = comment;
+        this.moderationStatus = moderationStatus;
+    }
 }
