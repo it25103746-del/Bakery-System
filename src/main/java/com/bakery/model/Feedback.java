@@ -27,5 +27,11 @@ public class Feedback extends BakeryRecord {
         return List.of(customerName, rating, comment);
     }
 
-
+    @Override
+    public void applyFileFields(List<String> fields) {
+        customerName = fields.get(0);
+        rating = fields.get(1);
+        comment = fields.get(2);
+        moderationStatus = fields.size() > 3 ? fields.get(3) : "";
+    }
 }
