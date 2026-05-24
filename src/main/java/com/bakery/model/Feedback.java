@@ -16,4 +16,11 @@ public class Feedback extends BakeryRecord {
         this.comment = comment;
         this.moderationStatus = moderationStatus;
     }
+
+    @Override
+    public String getDisplayName() {
+        return customerName + " - " + rating + "/5";
+    }
+
+
 }
