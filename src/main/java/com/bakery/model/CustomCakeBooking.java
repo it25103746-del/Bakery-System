@@ -37,4 +37,6 @@ public class CustomCakeBooking extends BakeryRecord {
         designDetails = fields.get(2);
         pickupDate = fields.get(3);
         bookingStatus = fields.get(4);
+    }{
     }
+}
