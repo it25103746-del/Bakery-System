@@ -39,4 +39,14 @@ public class CustomCakeBooking extends BakeryRecord {
         bookingStatus = fields.get(4);
     }
     public String getCustomerName() { return customerName; }
-]
+    public void setCustomerName(String customerName) { this.customerName = customerName; }
+    public String getCakeSize() { return cakeSize; }
+    public void setCakeSize(String cakeSize) { this.cakeSize = cakeSize; }
+    public String getDesignDetails() { return designDetails; }
+    public void setDesignDetails(String designDetails) { this.designDetails = designDetails; }
+    public String getPickupDate() { return pickupDate; }
+    public void setPickupDate(String pickupDate) { this.pickupDate = pickupDate; }
+    public String getBookingStatus() { return bookingStatus; }
+    public void setBookingStatus(String bookingStatus) { this.bookingStatus = bookingStatus; }
+}
+
