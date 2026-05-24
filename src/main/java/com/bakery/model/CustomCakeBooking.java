@@ -29,3 +29,12 @@ public class CustomCakeBooking extends BakeryRecord {
     public List<String> toFileFields() {
         return List.of(customerName, cakeSize, designDetails, pickupDate, bookingStatus);
     }
+
+    @Override
+    public void applyFileFields(List<String> fields) {
+        customerName = fields.get(0);
+        cakeSize = fields.get(1);
+        designDetails = fields.get(2);
+        pickupDate = fields.get(3);
+        bookingStatus = fields.get(4);
+    }
