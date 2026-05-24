@@ -34,4 +34,13 @@ public class Feedback extends BakeryRecord {
         comment = fields.get(2);
         moderationStatus = fields.size() > 3 ? fields.get(3) : "";
     }
+
+    public String getCustomerName() { return customerName; }
+    public void setCustomerName(String customerName) { this.customerName = customerName; }
+    public String getRating() { return rating; }
+    public void setRating(String rating) { this.rating = rating; }
+    public String getComment() { return comment; }
+    public void setComment(String comment) { this.comment = comment; }
+    public String getModerationStatus() { return moderationStatus; }
+    public void setModerationStatus(String moderationStatus) { this.moderationStatus = moderationStatus; }
 }
