@@ -38,3 +38,4 @@ public class CustomCakeBooking extends BakeryRecord {
         pickupDate = fields.get(3);
         bookingStatus = fields.get(4);
     }
+    public String getCustomerName() { return customerName; }
