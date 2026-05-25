@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${module.title}">Module</title>
+    <link rel="stylesheet" th:href="@{/css/styles.css}">
+    <script defer th:src="@{/js/app.js}"></script>
+</head>
+<body>
+<header class="topbar compact">
+    <div>
+        <a class="back-link" th:href="@{/}">Back to dashboard</a>
+        <p class="eyebrow">Bakery records and daily operations</p>
+        <h1 th:text="${module.title}">Module</h1>
+    </div>
+    <a class="button" th:href="@{/modules/{key}/new(key=${module.key})}">Add New</a>
+</header>
+
+<main class="shell">
+    <section class="operations">
+        <div><strong>Overview</strong><span>Useful details and history</span></div>
+        <div><strong>Status</strong><span>Simple workspace actions</span></div>
+        <div><strong>Care</strong><span>Keep bakery records tidy</span></div>
+        <div><strong>Workspace</strong><span>Live bakery records</span></div>
+    </section>
+
+    <section class="table-wrap">
+        <input class="search" type="search" placeholder="Search records" data-search>
+        <table>
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th th:each="field : ${module.fields}" th:text="${field.label}">Field</th>
+                <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="record : ${records}" data-row>
+                <td th:text="${record.id}">ID</td>
+                <td th:each="field : ${module.fields}" th:text="${field.value(record)}">Value</td>
+                <td class="actions">
+                    <a class="small-button" th:href="@{/modules/{key}/{id}/edit(key=${module.key}, id=${record.id})}">Edit</a>
+                    <form th:action="@{/modules/{key}/{id}/delete(key=${module.key}, id=${record.id})}" method="post" data-confirm-delete>
+                        <button class="danger-button" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(records)}">
+                <td class="empty" th:colspan="${#lists.size(module.fields) + 2}">No records found.</td>
+            </tr>
+            </tbody>
+        </table>
+    </section>
+</main>
+</body>
+</html>
