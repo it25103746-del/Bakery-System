@@ -10,7 +10,7 @@ public class CustomCakeBooking extends BakeryRecord {
     private String bookingStatus;
 
     public CustomCakeBooking() {
-}
+    }
 
     public CustomCakeBooking(String id, String customerName, String cakeSize, String designDetails, String pickupDate, String bookingStatus) {
         super(id);
@@ -20,6 +20,7 @@ public class CustomCakeBooking extends BakeryRecord {
         this.pickupDate = pickupDate;
         this.bookingStatus = bookingStatus;
     }
+
     @Override
     public String getDisplayName() {
         return customerName + " - " + cakeSize;
@@ -38,6 +39,7 @@ public class CustomCakeBooking extends BakeryRecord {
         pickupDate = fields.get(3);
         bookingStatus = fields.get(4);
     }
+
     public String getCustomerName() { return customerName; }
     public void setCustomerName(String customerName) { this.customerName = customerName; }
     public String getCakeSize() { return cakeSize; }
@@ -49,4 +51,3 @@ public class CustomCakeBooking extends BakeryRecord {
     public String getBookingStatus() { return bookingStatus; }
     public void setBookingStatus(String bookingStatus) { this.bookingStatus = bookingStatus; }
 }
-
