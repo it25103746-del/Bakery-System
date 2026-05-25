@@ -22,4 +22,26 @@ public class CustomerOrder extends BakeryRecord {
     }
 
 
+    @Override
+    public String getDisplayName(){
+        return customerName + " - " + orderStatus;
+    }
+
+    @Override
+    public List<String> toFileFields(){
+        return List.of(customerName, orderedItems, totalAmount, orderStatus, paymentStatus);
+
+    }
+
+    @Override
+    public void apllyFileFields(List<String> fields){
+
+        customerName = fields.get(0);
+        orderedItems = fields.get(1);
+        totalAmount = fields.get(2);
+        orderStatus = fields.get(3);
+        paymentStatus = fields.get(4);
+    }
+
+
 }
