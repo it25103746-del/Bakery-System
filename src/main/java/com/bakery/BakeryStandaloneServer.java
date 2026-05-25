@@ -285,7 +285,7 @@ public class BakeryStandaloneServer {
     private static String decode(String value) {
         return URLDecoder.decode(value == null ? "" : value, StandardCharsets.UTF_8);
     }
-    
+
     private record Module(String key, String title, String studentId, String studentName, String createText,
                           String readText, String updateText, String deleteText, String fileName, List<String> fields) {
         String publicTitle() {
@@ -299,6 +299,9 @@ public class BakeryStandaloneServer {
                 default -> title;
             };
         }
+    }
+
+    private record Record(String id, List<String> values) {
     }
 
     private record UserSession(String role, String email, String name) {
