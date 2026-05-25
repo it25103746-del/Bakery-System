@@ -232,6 +232,60 @@ public class BakeryStandaloneServer {
         notFound(exchange);
     }
 
+    private static String loginPage(String error) {
+        String notice = error.isBlank() ? "" : "<p class=\"error\">" + escape(error) + "</p>";
+        return authLayout("Login", """
+                <section class="auth-card">
+                <div class="brand"><span>Sweet Crumbs</span><h1>Bakery Portal</h1><p>Welcome back</p></div>
+                %s
+                <form method="post" action="/login">
+                <label>Role<select name="role" required><option value="admin">Admin</option><option value="customer">Customer</option></select></label>
+                <label>Email<input name="email" type="email" placeholder="Email address" required></label>
+                <label>Password<input name="password" type="password" placeholder="Password" required></label>
+                <button class="button" type="submit">Login</button>
+                </form>
+                <a class="text-link" href="/create-account">Create customer account</a>
+                </section>
+                """.formatted(notice));
+    }
+
+    private static String authLayout(String title, String body) {
+        return """
+                <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+                <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <title>%s</title><style>
+                :root { --primary: #c25c31; --primary-dark: #91401f; --bg-gradient-start: rgba(28,20,16,.9); --bg-gradient-end: rgba(65,34,20,.8); --card-bg: rgba(255,250,244,.98); --text-dark: #27211d; --text-muted: #6d625a; }
+                body{min-height:100vh;margin:0;display:grid;place-items:center;padding:18px;background:linear-gradient(135deg,var(--bg-gradient-start),var(--bg-gradient-end)),url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1600&q=80') center/cover;font-family:'Inter',sans-serif;color:var(--text-dark)}.auth-card{width:min(420px,100%%);padding:32px;background:var(--card-bg);border:1px solid rgba(255,255,255,0.4);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,0.4);backdrop-filter:blur(16px);transform:translateY(20px);animation:slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;}
+                @keyframes slideUp { to { transform:translateY(0); } }
+                .brand span{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase}.brand h1{margin:8px 0 6px;font-size:32px;line-height:1.1;letter-spacing:-0.5px}.brand p{margin:0 0 24px;color:var(--text-muted);font-size:14px;font-weight:500}form{display:grid;gap:16px}label{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--text-dark)}input,select{width:100%%;box-sizing:border-box;min-height:44px;padding:10px 14px;border:1px solid #e0d0c4;border-radius:8px;font:inherit;font-size:14px;background:#fff;color:var(--text-dark);transition:all 0.2s ease}input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.15)}.button{min-height:46px;border:0;border-radius:8px;background:var(--primary);color:white;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(194,92,49,0.3)}.button:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 6px 16px rgba(194,92,49,0.4)}.text-link{display:inline-block;margin-top:20px;color:var(--primary-dark);font-size:14px;font-weight:600;text-decoration:none;transition:opacity 0.2s}.text-link:hover{opacity:0.8;text-decoration:underline}.error{display:none}.toast{position:fixed;top:20px;right:20px;max-width:340px;padding:16px;border-radius:12px;background:#2d211b;color:#fff;font-size:14px;font-weight:600;box-shadow:0 20px 40px rgba(0,0,0,0.3);z-index:5;animation:slideIn 0.4s ease forwards}.toast:empty{display:none}
+                @keyframes slideIn { from { transform:translateX(20px);opacity:0; } to { transform:translateX(0);opacity:1; } }
+                @media(max-width:520px){body{padding:16px;align-items:center}.auth-card{padding:24px}.brand h1{font-size:28px}.toast{left:16px;right:16px;top:16px;max-width:none}}
+                </style><script>setTimeout(()=>{const t=document.querySelector('.toast');if(t)t.style.opacity='0';setTimeout(()=>t&&(t.style.display='none'),300)},4000)</script></head><body><div class="toast">%s</div>%s</body></html>
+                """.formatted(escape(title), notificationFrom(body), body);
+    }
+
+    private static String notificationFrom(String body) {
+        int start = body.indexOf("<p class=\"error\">");
+        if (start < 0) {
+            return "";
+        }
+        start += "<p class=\"error\">".length();
+        int end = body.indexOf("</p>", start);
+        return end > start ? body.substring(start, end) : "";
+    }
+
+    private static int stockAmount(Record product) {
+        if (product == null || product.values().size() < 6) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(product.values().get(5).trim()));
+        } catch (NumberFormatException exception) {
+            return 0;
+        }
+    }
+
     private static UserSession currentSession(HttpExchange exchange) {
         String token = sessionToken(exchange);
         return token == null ? null : SESSIONS.get(token);
@@ -273,6 +327,25 @@ public class BakeryStandaloneServer {
         return records;
     }
 
+    private static List<String> normalizedValues(Module module, List<String> values) {
+        List<String> normalized = new ArrayList<>(values);
+        if ("feedback".equals(module.key()) && normalized.size() > module.fields().size()) {
+            return new ArrayList<>(normalized.subList(0, module.fields().size()));
+        }
+        while (normalized.size() < module.fields().size()) {
+            if ("products".equals(module.key()) && normalized.size() == 5) {
+                normalized.add("10");
+            } else {
+                normalized.add("");
+            }
+        }
+        return normalized;
+    }
+
+    private static Module findModule(String key) {
+        return MODULES.stream().filter(module -> module.key().equals(key)).findFirst().orElse(null);
+    }
+
     private static void html(HttpExchange exchange, String html) throws IOException {
         byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
@@ -280,6 +353,10 @@ public class BakeryStandaloneServer {
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(bytes);
         }
+    }
+
+    private static String escape(String value) {
+        return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
     }
 
     private static String decode(String value) {
