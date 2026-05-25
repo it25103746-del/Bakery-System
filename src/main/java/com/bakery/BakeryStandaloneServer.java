@@ -6,14 +6,12 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public class BakeryStandaloneServer {
     private static final Path DATA_DIR = Path.of("data");
@@ -234,6 +232,47 @@ public class BakeryStandaloneServer {
         notFound(exchange);
     }
 
+    private static UserSession currentSession(HttpExchange exchange) {
+        String token = sessionToken(exchange);
+        return token == null ? null : SESSIONS.get(token);
+    }
+
+    private static String sessionToken(HttpExchange exchange) {
+        List<String> cookies = exchange.getRequestHeaders().get("Cookie");
+        if (cookies == null) {
+            return null;
+        }
+        for (String cookieHeader : cookies) {
+            for (String cookie : cookieHeader.split(";")) {
+                String[] parts = cookie.trim().split("=", 2);
+                if (parts.length == 2 && "bakery_session".equals(parts[0])) {
+                    return parts[1];
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<Record> readRecords(Module module) throws IOException {
+        Path file = DATA_DIR.resolve(module.fileName());
+        if (!Files.exists(file)) {
+            return new ArrayList<>();
+        }
+        List<Record> records = new ArrayList<>();
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String[] parts = line.split("\\|", -1);
+            List<String> values = new ArrayList<>();
+            for (int i = 1; i < parts.length; i++) {
+                values.add(decode(parts[i]));
+            }
+            records.add(new Record(decode(parts[0]), values));
+        }
+        return records;
+    }
+
     private static void html(HttpExchange exchange, String html) throws IOException {
         byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
@@ -243,6 +282,10 @@ public class BakeryStandaloneServer {
         }
     }
 
+    private static String decode(String value) {
+        return URLDecoder.decode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+    
     private record Module(String key, String title, String studentId, String studentName, String createText,
                           String readText, String updateText, String deleteText, String fileName, List<String> fields) {
         String publicTitle() {
