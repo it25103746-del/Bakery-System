@@ -4,7 +4,9 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -232,6 +234,15 @@ public class BakeryStandaloneServer {
         notFound(exchange);
     }
 
+    private static void html(HttpExchange exchange, String html) throws IOException {
+        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(bytes);
+        }
+    }
+
     private record Module(String key, String title, String studentId, String studentName, String createText,
                           String readText, String updateText, String deleteText, String fileName, List<String> fields) {
         String publicTitle() {
@@ -245,5 +256,178 @@ public class BakeryStandaloneServer {
                 default -> title;
             };
         }
+    }
+
+    private record UserSession(String role, String email, String name) {
+    }
+
+    private static String storefrontPage(HttpExchange exchange, String page) throws IOException {
+        UserSession session = currentSession(exchange);
+        boolean isLoggedIn = session != null && "customer".equals(session.role());
+        String orderedMsg = "ordered=1".equals(exchange.getRequestURI().getQuery()) ? "<div class='toast'>Order placed successfully! Track it in your dashboard.</div>" : "";
+        String stockMsg = "stock=0".equals(exchange.getRequestURI().getQuery()) ? "<div class='toast'>Not enough stock for that product.</div>" : "";
+
+        StringBuilder content = new StringBuilder();
+
+        if ("home".equals(page)) {
+            content.append("<section class='hero'><h1>Freshly Baked Happiness</h1><p>Order our artisan cakes, cupcakes, and pastries. Crafted with love and the finest ingredients.</p><a href='/menu' class='button'>Explore Menu</a></section>");
+            content.append("<section class='features' style='padding:80px 5%; text-align:center; display:grid; grid-template-columns:repeat(3,1fr); gap:40px;'>");
+            content.append("<div class='feature-box'><h3>Fresh Daily</h3><p>Baked every morning with premium ingredients.</p></div>");
+            content.append("<div class='feature-box'><h3>Custom Designs</h3><p>Personalized cakes for your special moments.</p></div>");
+            content.append("<div class='feature-box'><h3>Fast Delivery</h3><p>Warm treats delivered straight to your door.</p></div>");
+            content.append("</section>");
+        } else if ("menu".equals(page)) {
+            List<Record> products = readRecords(findModule("products"));
+            StringBuilder productGrid = new StringBuilder();
+            if (products.isEmpty()) {
+                String[][] defaults = {
+                        {"Artisan Cupcake", "Rs. 450", "/public/images/product_cupcake_1777824835243.png"},
+                        {"Red Velvet Cake", "Rs. 3200", "/public/images/product_cake_1777824854074.png"},
+                        {"Chocolate Cookies", "Rs. 250", "/public/images/product_cookies_1777825136738.png"},
+                        {"Butter Croissant", "Rs. 350", "/public/images/product_croissant_1777825151387.png"},
+                        {"Sourdough Bread", "Rs. 600", "/public/images/product_bread_1777825166311.png"},
+                        {"Glazed Donuts", "Rs. 300", "/public/images/product_donuts_1777825181310.png"}
+                };
+                for (String[] d : defaults) {
+                    productGrid.append("<div class='product-card'><div class='img-wrap'><img src='").append(d[2]).append("' alt='").append(d[0]).append("'></div><h3>").append(d[0]).append("</h3><p>").append(d[1]).append("</p>");
+                    if (isLoggedIn) productGrid.append("<form method='post' action='/add-to-cart'><input type='hidden' name='product' value='").append(d[0]).append("'><input type='hidden' name='price' value='").append(d[1]).append("'><button type='submit' class='button small'>Order Now</button></form>");
+                    else productGrid.append("<a href='/login' class='button small'>Login to Order</a>");
+                    productGrid.append("</div>");
+                }
+            } else {
+                for (Record p : products) {
+                    List<String> values = normalizedValues(findModule("products"), p.values());
+                    if (values.size() < 6 || !"Available".equalsIgnoreCase(values.get(4)) || stockAmount(new Record(p.id(), values)) <= 0) continue;
+                    String name = escape(values.get(0));
+                    String price = escape(values.get(2));
+                    String stock = escape(values.get(5));
+                    String img = "/public/images/product_cupcake_1777824835243.png";
+                    if (name.toLowerCase().contains("cake") && !name.toLowerCase().contains("cup")) img = "/public/images/product_cake_1777824854074.png";
+                    else if (name.toLowerCase().contains("cookie")) img = "/public/images/product_cookies_1777825136738.png";
+                    else if (name.toLowerCase().contains("croissant")) img = "/public/images/product_croissant_1777825151387.png";
+                    else if (name.toLowerCase().contains("bread")) img = "/public/images/product_bread_1777825166311.png";
+                    else if (name.toLowerCase().contains("donut")) img = "/public/images/product_donuts_1777825181310.png";
+
+                    productGrid.append("<div class='product-card'><div class='img-wrap'><img src='").append(img).append("' alt='").append(name).append("'></div><h3>").append(name).append("</h3><p>").append(price).append("</p><span class='stock-badge'>In stock: ").append(stock).append("</span>");
+                    if (isLoggedIn) productGrid.append("<form method='post' action='/add-to-cart'><input type='hidden' name='productId' value='").append(escape(p.id())).append("'><input type='number' min='1' max='").append(stock).append("' name='quantity' value='1'><button type='submit' class='button small'>Order Now</button></form>");
+                    else productGrid.append("<a href='/login' class='button small'>Login to Order</a>");
+                    productGrid.append("</div>");
+                }
+            }
+            content.append(stockMsg).append("<section class='products-sec'><h2>Our Menu</h2><div class='grid'>").append(productGrid).append("</div></section>");
+        } else if ("about".equals(page)) {
+            content.append("<section class='about-page'>");
+            content.append("<h1>Our Story</h1>");
+            content.append("<p>Sweet Crumbs Bakery started with a simple passion: bringing the warmth of fresh-baked goods to every home. We believe in the magic of high-quality ingredients and traditional techniques.</p>");
+            content.append("<div class='about-img' style='background-image: url(\"https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=1200&q=80\")'></div>");
+            content.append("</section>");
+        } else if ("contact".equals(page)) {
+            content.append("<section class='contact-page'>");
+            content.append("<div class='contact-header'><h1>Contact Us</h1><p>Have a question or a special order? We'd love to hear from you!</p></div>");
+            content.append("<div class='contact-container'>");
+            content.append("<div class='contact-info'><h3>Get in Touch</h3><p>Visit us or send a message for custom cake orders and bulk bookings.</p><ul><li><b>Address:</b> 123 Bakery Lane, Colombo 07</li><li><b>Phone:</b> +94 11 234 5678</li><li><b>Email:</b> hello@sweetcrumbs.lk</li></ul></div>");
+            content.append("<div class='contact-form'>");
+            content.append("<label>Name<input placeholder='Your name'></label>");
+            content.append("<label>Email<input type='email' placeholder='Your email'></label>");
+            content.append("<label>Message<textarea placeholder='How can we help?'></textarea></label>");
+            content.append("<button class='button'>Send Message</button>");
+            content.append("</div></div></section>");
+        }
+
+        String navLinks = """
+            <a href='/' class='nav-link %s'>Home</a>
+            <a href='/menu' class='nav-link %s'>Menu</a>
+            <a href='/about' class='nav-link %s'>About Us</a>
+            <a href='/contact' class='nav-link %s'>Contact</a>
+            """.formatted(
+                "home".equals(page) ? "active" : "",
+                "menu".equals(page) ? "active" : "",
+                "about".equals(page) ? "active" : "",
+                "contact".equals(page) ? "active" : ""
+        );
+
+        String userArea = isLoggedIn
+                ? "<a href='/customer/dashboard' class='nav-link'>Dashboard</a> <a href='/logout' class='button small' style='margin-left:15px;'>Logout</a>"
+                : "<a href='/login' class='nav-link'>Login</a> <a href='/create-account' class='button small' style='margin-left:15px;'>Sign Up</a>";
+
+        String html = """
+            <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+            <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+            <title>Sweet Crumbs Bakery</title><style>
+            :root { --primary: #c25c31; --primary-dark: #91401f; --bg-main: #fcfaf8; --surface: #ffffff; --text-dark: #27211d; --text-muted: #6d625a; --border: #e8dcd0; --sidebar-bg: #221814; }
+            body{margin:0;background:var(--bg-main);color:var(--text-dark);font-family:'Inter',sans-serif;font-size:15px;line-height:1.6;display:flex;flex-direction:column;min-height:100vh}
+            header{display:flex;align-items:center;justify-content:space-between;padding:12px 5%%;background:var(--surface);box-shadow:0 2px 15px rgba(0,0,0,0.04);position:sticky;top:0;z-index:100;flex-wrap:wrap;gap:15px}
+            .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--primary);font-weight:800;font-size:22px;letter-spacing:-0.5px}
+            .logo img{height:36px;width:36px;object-fit:contain}
+            nav{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
+            .nav-link{text-decoration:none;color:var(--text-dark);font-weight:600;margin:0 8px;transition:color 0.2s;font-size:14px;padding:5px 0}
+            .nav-link:hover, .nav-link.active{color:var(--primary)}
+            .button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 24px;border:0;border-radius:10px;background:var(--primary);color:white;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;transition:all 0.2s ease}
+            .button.small{min-height:36px;padding:0 16px;font-size:13px;border-radius:8px}
+            .button:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 6px 16px rgba(194,92,49,0.3)}
+            .hero{padding:120px 5%%;text-align:center;background:linear-gradient(135deg,rgba(40,25,18,0.85),rgba(90,45,25,0.8)),url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1600&q=80') center/cover;color:white}
+            .hero h1{font-size:clamp(32px, 8vw, 58px);font-weight:800;margin:0 0 20px;letter-spacing:-2px;line-height:1.1}
+            .hero p{font-size:clamp(16px, 4vw, 20px);max-width:700px;margin:0 auto 40px;color:rgba(255,255,255,0.9)}
+            .feature-box{padding:30px;background:white;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.03);border:1px solid var(--border);transition:all 0.3s}
+            .feature-box:hover{transform:translateY(-5px);box-shadow:0 10px 30px rgba(0,0,0,0.06)}
+            .feature-box h3{font-size:22px;margin:0 0 10px;color:var(--primary)}
+            .products-sec{padding:80px 5%%;max-width:1100px;margin:0 auto}
+            .products-sec h2{font-size:clamp(28px, 6vw, 38px);font-weight:800;margin-bottom:50px;text-align:center;letter-spacing:-1px}
+            .grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:25px}
+            .product-card{background:var(--surface);border-radius:14px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.04);transition:all 0.3s ease;display:flex;flex-direction:column;padding-bottom:16px;text-align:center;border:1px solid var(--border)}
+            .product-card:hover{transform:translateY(-6px);box-shadow:0 15px 35px rgba(0,0,0,0.08)}
+            .img-wrap{width:100%%;height:170px;overflow:hidden;background:#fdfaf7}
+            .product-card img{width:100%%;height:100%%;object-fit:cover;transition:transform 0.5s}
+            .product-card:hover img{transform:scale(1.08)}
+            .product-card h3{margin:15px 15px 5px;font-size:18px;font-weight:700}
+            .product-card p{margin:0 15px 15px;color:var(--primary);font-weight:800;font-size:16px}
+            .stock-badge{margin:0 15px 14px;color:var(--text-muted);font-size:13px;font-weight:700}
+            .product-card form{margin:auto 15px 0;display:grid;grid-template-columns:90px 1fr;gap:10px}
+            .product-card input{min-height:36px;border:1px solid var(--border);border-radius:8px;padding:0 10px;font:inherit}
+            .about-page{padding:80px 5%%;max-width:900px;margin:0 auto;text-align:center}
+            .about-page h1{font-size:clamp(32px, 8vw, 48px);font-weight:800;color:var(--primary);margin-bottom:20px}
+            .about-page p{font-size:18px;color:var(--text-muted);margin-bottom:50px}
+            .about-img{width:100%%;height:450px;border-radius:24px;background-size:cover;background-position:center;box-shadow:0 20px 40px rgba(0,0,0,0.1)}
+            .contact-page{padding:80px 5%%;max-width:1000px;margin:0 auto}
+            .contact-header{text-align:center;margin-bottom:60px}
+            .contact-header h1{font-size:48px;font-weight:800;color:var(--primary);margin-bottom:10px}
+            .contact-container{display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:40px;align-items:start}
+            .contact-info{background:var(--sidebar-bg);color:white;padding:40px;border-radius:20px;box-shadow:0 15px 40px rgba(0,0,0,0.1)}
+            .contact-info h3{font-size:24px;margin-bottom:20px;color:var(--primary)}
+            .contact-info ul{list-style:none;padding:0;margin-top:30px}
+            .contact-info li{margin-bottom:15px;font-size:16px;color:#d9b89b}
+            .contact-form{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,0.05);border:1px solid var(--border);display:grid;gap:20px}
+            .contact-form label{font-weight:700;font-size:14px;display:grid;gap:8px}
+            .contact-form input, .contact-form textarea{width:100%%;padding:12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:15px;transition:all 0.2s}
+            .contact-form input:focus, .contact-form textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(194,92,49,0.1)}
+            .contact-form textarea{min-height:120px;resize:vertical}
+            footer{margin-top:auto;background:var(--sidebar-bg);padding:80px 5%% 40px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:40px;border-top:5px solid var(--primary)}
+            .footer-box{padding:25px;background:rgba(255,255,255,0.03);border-radius:16px;border:1px solid rgba(255,255,255,0.05)}
+            footer h4{color:var(--primary);font-size:18px;margin:0 0 20px;text-transform:uppercase;letter-spacing:1.5px;font-weight:800}
+            footer p, footer a{color:#d9b89b;font-size:14px;text-decoration:none;margin-bottom:12px;display:block;font-weight:500;transition:color 0.2s}
+            footer a:hover{color:white}
+            .toast{position:fixed;top:20px;right:20px;padding:16px 24px;border-radius:12px;background:#221814;color:#fff;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,0.2);animation:slideIn 0.4s ease forwards;z-index:1000}
+            @keyframes slideIn{from{transform:translateX(50px);opacity:0}to{transform:translateX(0);opacity:1}}
+            @media(max-width:768px){
+                header{justify-content:center;text-align:center;}
+                .hero{padding:80px 20px;}
+                .contact-info, .contact-form{padding:30px 20px;}
+            }
+            </style>
+            <script>setTimeout(()=>{const t=document.querySelector('.toast');if(t)t.style.display='none'},4000)</script>
+            </head><body>%s
+            <header><a href="/" class="logo"><img src="/public/images/bakery_logo_1777824819116.png" alt="Logo">Sweet Crumbs</a><nav>%s</nav><div>%s</div></header>
+            <main>%s</main>
+            <footer>
+                <div class='footer-box'><h4>About Us</h4><p>Sweet Crumbs Bakery is dedicated to providing the finest artisan breads and pastries in the city. Founded in 2024, we continue to serve happiness daily.</p></div>
+                <div class='footer-box'><h4>Contact Info</h4><p>Address: 123 Bakery Lane, Colombo 07</p><p>Phone: +94 11 234 5678</p><p>Email: hello@sweetcrumbs.lk</p></div>
+                <div class='footer-box'><h4>Quick Links</h4><a href='/menu'>Our Menu</a><a href='/about'>Our Story</a><a href='/login'>Staff Login</a></div>
+                <div class='footer-box'><h4>Follow Us</h4><a href='#'>Instagram</a><a href='#'>Facebook</a><a href='#'>Twitter</a></div>
+            </footer>
+            <div style='background:var(--sidebar-bg); color:rgba(217,184,155,0.5); text-align:center; padding:20px; font-size:12px; border-top:1px solid rgba(255,255,255,0.05);'>&copy; 2026 Sweet Crumbs Bakery. All rights reserved.</div>
+            </body></html>
+            """;
+        return html.formatted(orderedMsg, navLinks, userArea, content.toString());
     }
 }
