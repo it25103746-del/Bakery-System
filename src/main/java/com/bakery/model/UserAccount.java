@@ -34,3 +34,13 @@ public class UserAccount extends BakeryRecord {
     public List<String> toFileFields() {
         return List.of(fullName, email, phone, address, accountStatus, temporaryPassword);
     }
+
+    @Override
+    public void applyFileFields(List<String> fields) {
+        fullName = fields.get(0);
+        email = fields.get(1);
+        phone = fields.get(2);
+        address = fields.get(3);
+        accountStatus = fields.get(4);
+        temporaryPassword = fields.size() > 5 ? fields.get(5) : "";
+    }
