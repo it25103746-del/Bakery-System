@@ -44,3 +44,16 @@ public class UserAccount extends BakeryRecord {
         accountStatus = fields.get(4);
         temporaryPassword = fields.size() > 5 ? fields.get(5) : "";
     }
+    public String getFullName() { return fullName; }
+    public void setFullName(String fullName) { this.fullName = fullName; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+    public String getAddress() { return address; }
+    public void setAddress(String address) { this.address = address; }
+    public String getAccountStatus() { return accountStatus; }
+    public void setAccountStatus(String accountStatus) { this.accountStatus = accountStatus; }
+    public String getTemporaryPassword() { return temporaryPassword; }
+    public void setTemporaryPassword(String temporaryPassword) { this.temporaryPassword = temporaryPassword; }
+}
