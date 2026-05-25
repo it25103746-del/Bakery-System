@@ -43,5 +43,36 @@ public class CustomerOrder extends BakeryRecord {
         paymentStatus = fields.get(4);
     }
 
+    public String getCustomerName() {
+        return customerName;
+    }
+    public void setCustomerName(String customerName) {
+        this.customerName = customerName;
+    }
+    public String getOrderedItems() {
+        return orderedItems;
+    }
+    public void setOrderedItems(String orderedItems) {
+        this.orderedItems = orderedItems;
+    }
+    public String getTotalAmount() {
+        return totalAmount;
+    }
+    public void setTotalAmount(String totalAmount) {
+        this.totalAmount = totalAmount;
+    }
+    public String getOrderStatus() {
+        return orderStatus;
+    }
+    public void setOrderStatus(String orderStatus) {
+        this.orderStatus = orderStatus;
+    }
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
+    }
+
 
 }
