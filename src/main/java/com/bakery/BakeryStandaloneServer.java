@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -249,6 +250,26 @@ public class BakeryStandaloneServer {
                 """.formatted(notice));
     }
 
+    private static String accountPage(String error) {
+        String notice = error.isBlank() ? "" : "<p class=\"error\">" + escape(error) + "</p>";
+        return authLayout("Create Account", """
+                <section class="auth-card">
+                <div class="brand"><span>Customer Registration</span><h1>Create Account</h1><p>Join Sweet Crumbs Bakery</p></div>
+                %s
+                <form method="post" action="/create-account">
+                <label>Name<input name="name" placeholder="Full name" required></label>
+                <label>Email<input name="email" type="email" placeholder="name@gmail.com" required></label>
+                <label>Phone Number<input name="phone" placeholder="Phone number" required></label>
+                <label>Address<input name="address" placeholder="Address" required></label>
+                <label>Password<input name="password" type="password" placeholder="Password" required></label>
+                <label>Confirm Password<input name="confirmPassword" type="password" placeholder="Confirm password" required></label>
+                <button class="button" type="submit">Create Account</button>
+                </form>
+                <a class="text-link" href="/login">Back to login</a>
+                </section>
+                """.formatted(notice));
+    }
+
     private static String authLayout(String title, String body) {
         return """
                 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -273,6 +294,41 @@ public class BakeryStandaloneServer {
         start += "<p class=\"error\">".length();
         int end = body.indexOf("</p>", start);
         return end > start ? body.substring(start, end) : "";
+    }
+
+    private static void createAccount(Map<String, String> form) throws IOException {
+        Files.createDirectories(DATA_DIR);
+        String id = "AC-" + Instant.now().toEpochMilli();
+        String line = String.join("|",
+                url(id),
+                url(form.getOrDefault("name", "")),
+                url(form.getOrDefault("email", "")),
+                url(form.getOrDefault("password", "")),
+                url(form.getOrDefault("phone", "")),
+                url(form.getOrDefault("address", "")),
+                url("Active"));
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        List<String> lines = Files.exists(file) ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8)) : new ArrayList<>();
+        lines.add(line);
+        Files.write(file, lines, StandardCharsets.UTF_8);
+
+        Module usersModule = findModule("users");
+        List<Record> users = readRecords(usersModule);
+        users.removeIf(record -> record.values().size() > 1
+                && record.values().get(1).equalsIgnoreCase(form.getOrDefault("email", "")));
+        users.add(new Record("USERS-" + Instant.now().toEpochMilli(), List.of(
+                form.getOrDefault("name", ""),
+                form.getOrDefault("email", ""),
+                form.getOrDefault("phone", ""),
+                form.getOrDefault("address", ""),
+                "Active",
+                ""
+        )));
+        writeRecords(usersModule, users);
+    }
+
+    private static boolean isValidEmail(String email) {
+        return email != null && email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
     }
 
     private static int stockAmount(Record product) {
@@ -342,6 +398,16 @@ public class BakeryStandaloneServer {
         return normalized;
     }
 
+    private static Map<String, String> parseForm(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String pair : body.split("&")) {
+            String[] parts = pair.split("=", 2);
+            values.put(decode(parts[0]), parts.length > 1 ? decode(parts[1]) : "");
+        }
+        return values;
+    }
+
     private static Module findModule(String key) {
         return MODULES.stream().filter(module -> module.key().equals(key)).findFirst().orElse(null);
     }
@@ -355,8 +421,17 @@ public class BakeryStandaloneServer {
         }
     }
 
+    private static void redirect(HttpExchange exchange, String location) throws IOException {
+        exchange.getResponseHeaders().set("Location", location);
+        exchange.sendResponseHeaders(303, -1);
+    }
+
     private static String escape(String value) {
         return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private static String url(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
     }
 
     private static String decode(String value) {
