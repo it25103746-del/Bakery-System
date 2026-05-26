@@ -1,5 +1,3 @@
-package com.bakery;
-
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -12,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.*;
 
 public class BakeryStandaloneServer {
     private static final Path DATA_DIR = Path.of("data");
