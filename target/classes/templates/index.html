@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bakery Order Platform</title>
+    <link rel="stylesheet" th:href="@{/css/styles.css}">
+</head>
+<body>
+<header class="topbar">
+    <div>
+        <p class="eyebrow">Fresh orders, custom cakes, and daily bakery operations</p>
+        <h1>Sweet Crumbs Bakery Management System</h1>
+    </div>
+</header>
+
+<main class="shell">
+    <section class="summary">
+        <div>
+            <h2>Bakery Control Center</h2>
+            <p>Manage customers, products, orders, cake bookings, staff access, and customer feedback from one place.</p>
+        </div>
+    </section>
+
+    <section class="module-grid">
+        <article class="module-card" th:each="module : ${modules}">
+            <div>
+                <h3 th:text="${module.title}">Module</h3>
+                <p>Organized records with text-file storage and simple daily actions.</p>
+            </div>
+            <dl>
+                <div><dt>Primary</dt><dd>Daily bakery records</dd></div>
+                <div><dt>Insights</dt><dd>Useful details and history</dd></div>
+                <div><dt>Control</dt><dd>Simple workspace actions</dd></div>
+            </dl>
+            <a class="button" th:href="@{/modules/{key}(key=${module.key})}">Open</a>
+        </article>
+    </section>
+</main>
+</body>
+</html>
