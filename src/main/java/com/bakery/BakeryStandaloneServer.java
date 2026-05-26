@@ -102,7 +102,7 @@ public class BakeryStandaloneServer {
             String confirmPassword = form.getOrDefault("confirmPassword", "");
             String email = form.getOrDefault("email", "");
             if (!isValidEmail(email)) {
-                html(exchange, accountPage("Please enter a valid email address."));
+                html(exchange, accountPage("Please enter a valid Gmail address (must end with @gmail.com)."));
                 return;
             }
             if (password.length() < 6) {
@@ -166,7 +166,7 @@ public class BakeryStandaloneServer {
             Module orderModule = findModule("orders");
             List<Record> orders = readRecords(orderModule);
             String id = "ORDERS-" + Instant.now().toEpochMilli();
-            orders.add(new Record(id, List.of(session.name(), orderedItems, calculateOrderTotal(orderedItems), "Processing", "Pending Approval")));
+            orders.add(new Record(id, List.of(session.name(), orderedItems, calculateOrderTotal(orderedItems), "Confirmed", "Pending Approval")));
             writeRecords(orderModule, orders);
 
             redirect(exchange, "/?ordered=1");
@@ -406,7 +406,7 @@ public class BakeryStandaloneServer {
     }
 
     private static boolean isValidEmail(String email) {
-        return email != null && email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+        return email != null && email.matches("^[A-Za-z0-9._%+-]+@gmail\\.com$");
     }
 
     private static String autoTotalAmount(String orderedItem, String fallbackPrice) {
@@ -583,6 +583,279 @@ public class BakeryStandaloneServer {
         return "<a class=\"button\" href=\"/" + role + "/modules/" + module.key() + "/new\">" + escape(module.createText()) + "</a>";
     }
 
+    private static String actionButtons(String role, Module module, Record record) {
+        if ("customer".equals(role)) {
+            if ("orders".equals(module.key()) || "custom-cakes".equals(module.key())) {
+                return """
+                        <a class="small" href="/%s/modules/%s/%s/edit">%s</a>
+                        <form method="post" action="/%s/modules/%s/%s/delete" onsubmit="return confirm('Are you sure?')"><button>%s</button></form>
+                        """.formatted(role, module.key(), url(record.id()), escape(module.updateText()), role, module.key(), url(record.id()), escape(module.deleteText()));
+            }
+            return "";
+        }
+        return """
+                <a class="small" href="/%s/modules/%s/%s/edit">%s</a>
+                <form method="post" action="/%s/modules/%s/%s/delete" onsubmit="return confirm('Are you sure?')"><button>%s</button></form>
+                """.formatted(role, module.key(), url(record.id()), escape(module.updateText()), role, module.key(), url(record.id()), escape(module.deleteText()));
+    }
+
+    private static String formPage(HttpExchange exchange, String role, Module module, Record record) throws IOException {
+        StringBuilder inputs = new StringBuilder();
+        List<String> values = record == null ? List.of() : normalizedValues(module, record.values());
+        for (int i = 0; i < module.fields().size(); i++) {
+            String value = i < values.size() ? values.get(i) : "";
+            if ("customer".equals(role) && i == 0 && ("feedback".equals(module.key()) || "orders".equals(module.key()) || "custom-cakes".equals(module.key()))) {
+                UserSession session = currentSession(exchange);
+                value = session == null ? value : session.name();
+                inputs.append("<input type=\"hidden\" name=\"field").append(i).append("\" value=\"").append(escape(value)).append("\">");
+                continue;
+            }
+            if ("customer".equals(role) && "orders".equals(module.key()) && (i == 3 || i == 4)) {
+                String hiddenValue;
+                if (i == 3) {
+                    hiddenValue = record == null ? defaultText(value, "Confirmed") : "Pending";
+                } else {
+                    hiddenValue = defaultText(normalizePaymentStatus(value), "Pending Approval");
+                }
+                inputs.append("<input type=\"hidden\" name=\"field").append(i).append("\" value=\"")
+                        .append(escape(hiddenValue))
+                        .append("\">");
+                continue;
+            }
+            if ("customer".equals(role) && "custom-cakes".equals(module.key()) && i == 4) {
+                inputs.append("<input type=\"hidden\" name=\"field").append(i).append("\" value=\"")
+                        .append(escape(defaultText(value, "Pending")))
+                        .append("\">");
+                continue;
+            }
+            inputs.append(fieldControl(role, module, i, value, record != null));
+        }
+        String id = record == null ? "" : record.id();
+        String title = record == null ? "Add " + module.singleName() : "Edit " + module.singleName();
+        String submitLabel = "orders".equals(module.key()) ? "Order" : "Save";
+        String body = """
+                <section class="page-title"><div><p>%s</p><h1>%s</h1></div></section>
+                <section class="form-wrap"><form method="post" action="/%s/modules/%s"><input type="hidden" name="id" value="%s">%s<div><button class="button" type="submit">%s</button><a class="small" href="/%s/modules/%s">Cancel</a></div></form></section>
+                """.formatted(escape(module.publicTitle()), escape(title), role, module.key(), escape(id), inputs, submitLabel, role, module.key());
+        return appLayout(role, title, body);
+    }
+
+    private static String fieldControl(String role, Module module, int index, String value, boolean editing) throws IOException {
+        String label = module.fields().get(index);
+        String fieldName = "field" + index;
+        if ("feedback".equals(module.key()) && index == 1) {
+            int current = 0;
+            String digits = value == null ? "" : value.replaceAll("[^0-9]", "");
+            if (!digits.isEmpty()) {
+                try { current = Math.max(0, Math.min(5, Integer.parseInt(digits))); } catch (NumberFormatException ignored) {}
+            }
+            StringBuilder choices = new StringBuilder("<option value=\"\">Select a rating</option>");
+            for (int s = 1; s <= 5; s++) {
+                StringBuilder stars = new StringBuilder();
+                for (int j = 0; j < s; j++) stars.append("★");
+                for (int j = s; j < 5; j++) stars.append("☆");
+                choices.append("<option value=\"").append(s).append("\"")
+                        .append(s == current ? " selected" : "").append(">")
+                        .append(stars).append(" (").append(s).append("/5)</option>");
+            }
+            return """
+                    <label>%s (out of 5 stars)<select name="%s" required>%s</select></label>
+                    """.formatted(escape(label), fieldName, choices);
+        }
+        if ("products".equals(module.key()) && index == 5) {
+            return """
+                    <label>%s<input type="number" min="0" name="%s" value="%s" required></label>
+                    """.formatted(escape(label), fieldName, escape(value.isBlank() ? "0" : value));
+        }
+        if ("orders".equals(module.key())) {
+            if (index == 1) {
+                return orderItemsControl(value);
+            }
+            if (index == 2) {
+                String generated = value == null || value.isBlank() ? "0" : value;
+                return """
+                        <label>%s<input name="%s" value="%s" required readonly data-total-amount></label>
+                        """.formatted(escape(label), fieldName, escape(generated));
+            }
+            if (index == 3) {
+                return selectControl(label, fieldName, value.isBlank() ? "Pending" : value, List.of("Pending", "Confirmed", "Processing", "Canceled"));
+            }
+            if (index == 4) {
+                return selectControl(label, fieldName, value.isBlank() ? "Pending Approval" : normalizePaymentStatus(value), List.of("Paid", "Refund", "Pending Approval"));
+            }
+        }
+        if ("custom-cakes".equals(module.key()) && index == 1) {
+            return selectControl(label, fieldName, value.isBlank() ? "1 kg" : value,
+                    List.of("0.5 kg", "1 kg", "1.5 kg", "2 kg", "2.5 kg", "3 kg", "4 kg", "5 kg"));
+        }
+        if ("custom-cakes".equals(module.key()) && index == 2) {
+            return """
+                    %s
+                    <label>%s<textarea name="%s" required>%s</textarea></label>
+                    """.formatted(cakeDesignPricingPanel(), escape(label), fieldName, escape(value));
+        }
+        if ("custom-cakes".equals(module.key()) && index == 3) {
+            String minDate = LocalDate.now().plusDays(1).toString();
+            return """
+                    <label>Pickup Date<input type="date" name="%s" value="%s" min="%s" required></label>
+                    """.formatted(fieldName, escape(value), minDate);
+        }
+        if ("custom-cakes".equals(module.key()) && index == 4) {
+            return selectControl(label, fieldName, value.isBlank() ? "Pending" : value, List.of("Pending", "Confirmed", "Completed"));
+        }
+        if ("users".equals(module.key()) && index == 4) {
+            return selectControl(label, fieldName, value.isBlank() ? "Active" : value, List.of("Active", "Inactive", "Expired"));
+        }
+        if ("users".equals(module.key()) && index == 5) {
+            String placeholder = editing ? "Leave blank to keep current password" : "Optional temporary password";
+            return """
+                    <label>%s<input name="%s" value="" placeholder="%s"></label>
+                    """.formatted(escape(label), fieldName, escape(placeholder));
+        }
+        String type = "Pickup Date".equals(label) ? "date" : "text";
+        return """
+                <label>%s<input type="%s" name="%s" value="%s" required></label>
+                """.formatted(escape(label), type, fieldName, escape(value));
+    }
+
+    private static String selectControl(String label, String fieldName, String value, List<String> options) {
+        StringBuilder choices = new StringBuilder();
+        for (String option : options) {
+            String selected = option.equalsIgnoreCase(value) ? " selected" : "";
+            choices.append("<option value=\"").append(escape(option)).append("\"").append(selected).append(">")
+                    .append(escape(option)).append("</option>");
+        }
+        return """
+                <label>%s<select name="%s" required>%s</select></label>
+                """.formatted(escape(label), fieldName, choices);
+    }
+
+    private static String orderItemsControl(String value) throws IOException {
+        List<Record> products = readRecords(findModule("products"));
+        StringBuilder options = new StringBuilder("<option value=\"\">Select product</option>");
+        for (Record product : products) {
+            List<String> values = normalizedValues(findModule("products"), product.values());
+            if (values.size() < 6 || !"Available".equalsIgnoreCase(values.get(4)) || stockAmount(new Record(product.id(), values)) <= 0) {
+                continue;
+            }
+            String label = values.get(0) + " - Rs. " + numberOnly(values.get(2)) + " (" + values.get(5) + " in stock)";
+            options.append("<option value=\"")
+                    .append(escape(product.id()))
+                    .append("\" data-price=\"")
+                    .append(escape(numberOnly(values.get(2))))
+                    .append("\" data-name=\"")
+                    .append(escape(values.get(0)))
+                    .append("\" data-stock=\"")
+                    .append(escape(values.get(5)))
+                    .append("\">")
+                    .append(escape(label))
+                    .append("</option>");
+        }
+        String firstRow = """
+                <div class="order-row"><select name="orderProduct0" data-order-product>%s</select><input type="number" min="1" name="orderQty0" value="1" data-order-qty></div>
+                """.formatted(options);
+        return """
+                <label>Order Items
+                    <textarea name="field1" data-order-item readonly required>%s</textarea>
+                    <div class="order-picker" data-order-picker>%s</div>
+                    <template data-row-template><div class="order-row"><select data-order-product>%s</select><input type="number" min="1" value="1" data-order-qty></div></template>
+                    <button type="button" class="small" data-add-row style="margin-top:8px;">+ Add product</button>
+                </label>
+                """.formatted(escape(value), firstRow, options);
+    }
+
+    private static String cakeDesignPricingPanel() {
+        return """
+                <div class="price-panel" data-cake-pricing>
+                    <strong>Custom Cake Price Guide</strong>
+                    <div class="price-grid">
+                        <span>Base price per 1 kg</span><span>Rs. 3,000</span>
+                        <span>Extra cashews</span><span>Rs. 500</span>
+                        <span>Extra chocolate</span><span>Rs. 500</span>
+                        <span>Top-only icing</span><span>Rs. 700</span>
+                        <span>Full cover icing</span><span>Rs. 1,200</span>
+                        <span>Customized design</span><span>Rs. 1,500</span>
+                    </div>
+                    <div class="addons">
+                        <label class="addon"><input type="checkbox" data-addon value="500" data-label="Extra cashews"> Extra cashews <em>(+Rs. 500)</em></label>
+                        <label class="addon"><input type="checkbox" data-addon value="500" data-label="Extra chocolate"> Extra chocolate <em>(+Rs. 500)</em></label>
+                        <label class="addon"><input type="radio" name="icingChoice" data-addon value="0" data-label="No icing" checked> No icing</label>
+                        <label class="addon"><input type="radio" name="icingChoice" data-addon value="700" data-label="Top-only icing"> Top-only icing <em>(+Rs. 700)</em></label>
+                        <label class="addon"><input type="radio" name="icingChoice" data-addon value="1200" data-label="Full cover icing"> Full cover icing <em>(+Rs. 1,200)</em></label>
+                        <label class="addon"><input type="checkbox" data-addon value="1500" data-label="Customized design"> Customized design <em>(+Rs. 1,500)</em></label>
+                    </div>
+                    <div class="price-total">Estimated total: <strong data-cake-total>Rs. 0</strong></div>
+                </div>
+                """;
+    }
+
+    private static String defaultText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String normalizePaymentStatus(String value) {
+        if ("Refunded".equalsIgnoreCase(value)) {
+            return "Refund";
+        }
+        if ("Unpaid".equalsIgnoreCase(value) || "Pending".equalsIgnoreCase(value)) {
+            return "Pending Approval";
+        }
+        return value;
+    }
+
+    private static String appLayout(String role, String title, String body) {
+        return """
+                <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+                <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <title>%s</title><style>
+                :root { --primary: #c25c31; --primary-dark: #91401f; --bg-main: #fcfaf8; --surface: #ffffff; --text-dark: #27211d; --text-muted: #6d625a; --sidebar-bg: #1c1410; --border: #e8dcd0; }
+                body{margin:0;background:var(--bg-main);color:var(--text-dark);font-family:'Inter',sans-serif;font-size:14px;line-height:1.5}.app{min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr)}.sidebar{padding:24px;background:var(--sidebar-bg);color:#fff;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05)}.brand{margin-bottom:32px}.brand b{display:block;font-size:20px;font-weight:800;letter-spacing:-0.5px;color:var(--primary)}.brand span{color:#d9b89b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.8}.nav{display:grid;gap:4px;flex:1}.nav a{padding:10px 16px;border-radius:10px;color:#d9b89b;text-decoration:none;font-weight:600;transition:all 0.2s ease;font-size:13px}.nav a:hover{background:rgba(194,92,49,0.1);color:#fff;transform:translateX(4px)}.signout{margin-top:auto;color:#f6c7b8!important;background:rgba(246,199,184,0.05)}.signout:hover{background:rgba(246,199,184,0.15);color:#fff!important}.content{min-width:0;padding:40px;overflow:auto;height:100vh;box-sizing:border-box}.hero-card,.page-title{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:32px;padding:40px;background:linear-gradient(135deg,rgba(40,25,18,0.95),rgba(194,92,49,0.8)),url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1400&q=80') center/cover;border-radius:20px;color:#fff;box-shadow:0 15px 35px rgba(0,0,0,0.12)}.hero-card h1,.page-title h1{margin:8px 0;font-size:38px;line-height:1.1;letter-spacing:-1.5px;font-weight:800}.hero-card p,.page-title p{margin:0;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:var(--primary)}.hero-card span{font-size:16px;color:rgba(255,255,255,0.9);font-weight:500;max-width:500px}.tile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}.tile{background:white;border:1px solid var(--border);border-radius:18px;padding:28px;text-decoration:none;color:var(--text-dark);display:flex;align-items:center;gap:20px;transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:0 4px 15px rgba(0,0,0,0.02)}.tile:hover{transform:translateY(-6px);box-shadow:0 20px 40px rgba(0,0,0,0.08);border-color:var(--primary)}.tile-icon{width:56px;height:56px;background:rgba(194,92,49,0.1);border-radius:14px;display:grid;place-items:center;font-size:24px;color:var(--primary);flex-shrink:0}.tile-content strong{display:block;font-size:18px;font-weight:700;margin-bottom:4px;letter-spacing:-0.4px}.tile-content small{color:var(--text-muted);font-size:13px;line-height:1.4;display:block}.button,.small,button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 20px;border:0;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;transition:all 0.2s}.button{color:white;background:var(--primary);box-shadow:0 8px 20px rgba(194,92,49,0.2)}.button:hover{background:var(--primary-dark);transform:translateY(-2px);box-shadow:0 12px 25px rgba(194,92,49,0.3)}.small{color:var(--primary);background:rgba(194,92,49,0.08);min-height:36px;padding:0 14px;font-size:12px}.small:hover{background:rgba(194,92,49,0.15)}button{color:white;background:#dc2626;min-height:36px}#search{width:100%%;box-sizing:border-box;min-height:48px;margin-bottom:24px;padding:0 20px;border:1px solid var(--border);border-radius:12px;font:inherit;background:white;transition:all 0.2s}#search:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}table{width:100%%;border-collapse:separate;border-spacing:0;background:white;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.04)}th,td{padding:18px 20px;border-bottom:1px solid var(--border);text-align:left}th{background:#fdfaf7;color:var(--primary);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:1px}tr:hover td{background:#fffbf8}.actions{display:flex;gap:10px}.form-wrap{max-width:800px;margin:0 auto}.form-wrap form{background:white;padding:40px;border-radius:20px;border:1px solid var(--border);box-shadow:0 20px 50px rgba(0,0,0,0.05);display:grid;gap:24px}label{font-weight:700;font-size:14px;color:var(--text-dark);display:grid;gap:8px}input,select,textarea{min-height:48px;padding:0 16px;border:1px solid var(--border);border-radius:10px;font:inherit;background:white;box-sizing:border-box;width:100%%}textarea{min-height:96px;padding:12px 16px}input[readonly],textarea[readonly]{background:#f7f1eb;color:var(--text-muted)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}.order-picker{display:grid;gap:10px}.order-row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}.price-panel{background:#fff7ef;border:1px solid #f1d4be;border-radius:14px;padding:18px;display:grid;gap:12px}.price-panel strong{color:var(--primary);font-size:13px;text-transform:uppercase;letter-spacing:1px}.price-grid{display:grid;grid-template-columns:1fr auto;gap:6px 16px;font-size:13px;color:var(--text-muted)}.price-grid span:nth-child(odd){font-weight:600;color:var(--text-dark)}.addons{display:grid;gap:6px;border-top:1px dashed #f1d4be;padding-top:10px}.addon{display:flex!important;align-items:center;gap:8px;font-weight:500;font-size:13px;margin:0}.addon input{min-height:auto!important;width:auto!important;padding:0!important;margin:0;border-radius:4px}.addon em{color:var(--primary);font-style:normal;font-weight:700;font-size:12px}.price-total{font-size:15px;font-weight:700;color:var(--text-dark);border-top:1px solid #f1d4be;padding-top:10px;text-align:right}.stars{color:#f5a623;font-weight:700;letter-spacing:2px;font-size:15px}@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{flex-direction:row;padding:12px 20px;position:sticky;top:0;z-index:100}.nav{display:none}.content{padding:20px}.hero-card{padding:30px;flex-direction:column;align-items:flex-start}.hero-card h1{font-size:30px}.order-row{grid-template-columns:1fr}}
+                </style><script>
+                function filterRows(q){q=q.toLowerCase();document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));}
+                function updateOrderDuplicates(){const selects=document.querySelectorAll('[data-order-product]');const taken=new Set();selects.forEach(s=>{if(s.value)taken.add(s.value);});selects.forEach(s=>{Array.from(s.options).forEach(opt=>{if(!opt.value){opt.disabled=false;return;}opt.disabled=opt.value!==s.value&&taken.has(opt.value);});});}
+                function syncOrder(){const item=document.querySelector('[data-order-item]');const total=document.querySelector('[data-total-amount]');if(!item||!total)return;let lines=[],sum=0;document.querySelectorAll('[data-order-product]').forEach(select=>{const opt=select.selectedOptions[0];if(!opt||!select.value)return;const row=select.closest('.order-row');const qtyInput=row?row.querySelector('input[type="number"]'):null;const qty=Math.max(1,parseInt(qtyInput?.value||'1',10));const stock=Math.max(0,parseInt(opt.dataset.stock||'0',10));if(qtyInput)qtyInput.max=stock;const useQty=Math.min(qty,stock);const price=parseFloat(opt.dataset.price||'0');lines.push(`${opt.dataset.name} x${useQty} @ ${price}`);sum+=useQty*price;});item.value=lines.join('\\n');total.value=sum?String(Math.round(sum*100)/100):'0';}
+                function addOrderRow(){const picker=document.querySelector('[data-order-picker]');const tmpl=document.querySelector('[data-row-template]');if(!picker||!tmpl)return;const rows=picker.querySelectorAll('.order-row');if(rows.length>=5)return;const idx=rows.length;const clone=tmpl.content.firstElementChild.cloneNode(true);const sel=clone.querySelector('select');const qty=clone.querySelector('input');sel.name='orderProduct'+idx;qty.name='orderQty'+idx;picker.appendChild(clone);updateOrderDuplicates();}
+                const CAKE_BASE_PER_KG=3000;
+                function parseKg(text){const m=(text||'').match(/([0-9]+(?:\\.[0-9]+)?)/);return m?parseFloat(m[1]):0;}
+                function syncCake(){const panel=document.querySelector('[data-cake-pricing]');if(!panel)return;const sizeSelect=document.querySelector('select[name="field1"]');const kg=sizeSelect?parseKg(sizeSelect.value):0;let total=kg*CAKE_BASE_PER_KG;panel.querySelectorAll('[data-addon]').forEach(input=>{if(input.checked)total+=parseFloat(input.value||'0');});const out=panel.querySelector('[data-cake-total]');if(out)out.textContent='Rs. '+total.toLocaleString();}
+                document.addEventListener('input',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
+                document.addEventListener('change',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
+                document.addEventListener('click',e=>{if(e.target.matches('[data-add-row]')){e.preventDefault();addOrderRow();}});
+                document.addEventListener('DOMContentLoaded',()=>{syncOrder();updateOrderDuplicates();syncCake();});
+                </script></head><body>%s</body></html>
+                """.formatted(escape(title), "<div class=\"app\">" + sidebar(role) + "<main class=\"content\">" + body + "</main></div>");
+    }
+
+    private static String sidebar(String role) {
+        List<Module> modules = "admin".equals(role) ? MODULES : MODULES.stream().filter(Module::customerAllowed).toList();
+        StringBuilder links = new StringBuilder();
+        links.append("<a href=\"/").append(role).append("/dashboard\">Dashboard</a>");
+        for (Module module : modules) {
+            links.append("<a href=\"/")
+                    .append(role)
+                    .append("/modules/")
+                    .append(module.key())
+                    .append("\">")
+                    .append(escape(module.publicTitle()))
+                    .append("</a>");
+        }
+        links.append("<a class=\"signout\" href=\"/logout\">Sign out</a>");
+        String label = "admin".equals(role) ? "Admin Panel" : "Customer Panel";
+        return """
+                <aside class="sidebar"><div class="brand"><b>Sweet Crumbs</b><span>%s</span></div><nav class="nav">%s</nav></aside>
+                """.formatted(label, links);
+    }
+
+    private static boolean requireRole(HttpExchange exchange, String role) throws IOException {
+        UserSession session = currentSession(exchange);
+        if (session != null && role.equals(session.role())) {
+            return true;
+        }
+        redirect(exchange, "/login");
+        return false;
+    }
+
     private static UserSession currentSession(HttpExchange exchange) {
         String token = sessionToken(exchange);
         return token == null ? null : SESSIONS.get(token);
@@ -624,28 +897,9 @@ public class BakeryStandaloneServer {
         return records;
     }
 
-    private static String appLayout(String role, String title, String body) {
-        return """
-                <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-                <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-                <title>%s</title><style>
-                :root { --primary: #c25c31; --primary-dark: #91401f; --bg-main: #fcfaf8; --surface: #ffffff; --text-dark: #27211d; --text-muted: #6d625a; --sidebar-bg: #1c1410; --border: #e8dcd0; }
-                body{margin:0;background:var(--bg-main);color:var(--text-dark);font-family:'Inter',sans-serif;font-size:14px;line-height:1.5}.app{min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr)}.sidebar{padding:24px;background:var(--sidebar-bg);color:#fff;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05)}.brand{margin-bottom:32px}.brand b{display:block;font-size:20px;font-weight:800;letter-spacing:-0.5px;color:var(--primary)}.brand span{color:#d9b89b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.8}.nav{display:grid;gap:4px;flex:1}.nav a{padding:10px 16px;border-radius:10px;color:#d9b89b;text-decoration:none;font-weight:600;transition:all 0.2s ease;font-size:13px}.nav a:hover{background:rgba(194,92,49,0.1);color:#fff;transform:translateX(4px)}.signout{margin-top:auto;color:#f6c7b8!important;background:rgba(246,199,184,0.05)}.signout:hover{background:rgba(246,199,184,0.15);color:#fff!important}.content{min-width:0;padding:40px;overflow:auto;height:100vh;box-sizing:border-box}.hero-card,.page-title{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:32px;padding:40px;background:linear-gradient(135deg,rgba(40,25,18,0.95),rgba(194,92,49,0.8)),url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1400&q=80') center/cover;border-radius:20px;color:#fff;box-shadow:0 15px 35px rgba(0,0,0,0.12)}.hero-card h1,.page-title h1{margin:8px 0;font-size:38px;line-height:1.1;letter-spacing:-1.5px;font-weight:800}.hero-card p,.page-title p{margin:0;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:var(--primary)}.hero-card span{font-size:16px;color:rgba(255,255,255,0.9);font-weight:500;max-width:500px}.tile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}.tile{background:white;border:1px solid var(--border);border-radius:18px;padding:28px;text-decoration:none;color:var(--text-dark);display:flex;align-items:center;gap:20px;transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:0 4px 15px rgba(0,0,0,0.02)}.tile:hover{transform:translateY(-6px);box-shadow:0 20px 40px rgba(0,0,0,0.08);border-color:var(--primary)}.tile-icon{width:56px;height:56px;background:rgba(194,92,49,0.1);border-radius:14px;display:grid;place-items:center;font-size:24px;color:var(--primary);flex-shrink:0}.tile-content strong{display:block;font-size:18px;font-weight:700;margin-bottom:4px;letter-spacing:-0.4px}.tile-content small{color:var(--text-muted);font-size:13px;line-height:1.4;display:block}.button,.small,button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 20px;border:0;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;transition:all 0.2s}.button{color:white;background:var(--primary);box-shadow:0 8px 20px rgba(194,92,49,0.2)}.button:hover{background:var(--primary-dark);transform:translateY(-2px);box-shadow:0 12px 25px rgba(194,92,49,0.3)}.small{color:var(--primary);background:rgba(194,92,49,0.08);min-height:36px;padding:0 14px;font-size:12px}.small:hover{background:rgba(194,92,49,0.15)}button{color:white;background:#dc2626;min-height:36px}#search{width:100%%;box-sizing:border-box;min-height:48px;margin-bottom:24px;padding:0 20px;border:1px solid var(--border);border-radius:12px;font:inherit;background:white;transition:all 0.2s}#search:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}table{width:100%%;border-collapse:separate;border-spacing:0;background:white;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.04)}th,td{padding:18px 20px;border-bottom:1px solid var(--border);text-align:left}th{background:#fdfaf7;color:var(--primary);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:1px}tr:hover td{background:#fffbf8}.actions{display:flex;gap:10px}.form-wrap{max-width:800px;margin:0 auto}.form-wrap form{background:white;padding:40px;border-radius:20px;border:1px solid var(--border);box-shadow:0 20px 50px rgba(0,0,0,0.05);display:grid;gap:24px}label{font-weight:700;font-size:14px;color:var(--text-dark);display:grid;gap:8px}input,select,textarea{min-height:48px;padding:0 16px;border:1px solid var(--border);border-radius:10px;font:inherit;background:white;box-sizing:border-box;width:100%%}textarea{min-height:96px;padding:12px 16px}input[readonly],textarea[readonly]{background:#f7f1eb;color:var(--text-muted)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}.order-picker{display:grid;gap:10px}.order-row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}.price-panel{background:#fff7ef;border:1px solid #f1d4be;border-radius:14px;padding:18px;display:grid;gap:12px}.price-panel strong{color:var(--primary);font-size:13px;text-transform:uppercase;letter-spacing:1px}.price-grid{display:grid;grid-template-columns:1fr auto;gap:6px 16px;font-size:13px;color:var(--text-muted)}.price-grid span:nth-child(odd){font-weight:600;color:var(--text-dark)}.addons{display:grid;gap:6px;border-top:1px dashed #f1d4be;padding-top:10px}.addon{display:flex!important;align-items:center;gap:8px;font-weight:500;font-size:13px;margin:0}.addon input{min-height:auto!important;width:auto!important;padding:0!important;margin:0;border-radius:4px}.addon em{color:var(--primary);font-style:normal;font-weight:700;font-size:12px}.price-total{font-size:15px;font-weight:700;color:var(--text-dark);border-top:1px solid #f1d4be;padding-top:10px;text-align:right}.stars{color:#f5a623;font-weight:700;letter-spacing:2px;font-size:15px}@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{flex-direction:row;padding:12px 20px;position:sticky;top:0;z-index:100}.nav{display:none}.content{padding:20px}.hero-card{padding:30px;flex-direction:column;align-items:flex-start}.hero-card h1{font-size:30px}.order-row{grid-template-columns:1fr}}
-                </style><script>
-                function filterRows(q){q=q.toLowerCase();document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));}
-                function updateOrderDuplicates(){const selects=document.querySelectorAll('[data-order-product]');const taken=new Set();selects.forEach(s=>{if(s.value)taken.add(s.value);});selects.forEach(s=>{Array.from(s.options).forEach(opt=>{if(!opt.value){opt.disabled=false;return;}opt.disabled=opt.value!==s.value&&taken.has(opt.value);});});}
-                function syncOrder(){const item=document.querySelector('[data-order-item]');const total=document.querySelector('[data-total-amount]');if(!item||!total)return;let lines=[],sum=0;document.querySelectorAll('[data-order-product]').forEach(select=>{const opt=select.selectedOptions[0];if(!opt||!select.value)return;const row=select.closest('.order-row');const qtyInput=row?row.querySelector('input[type="number"]'):null;const qty=Math.max(1,parseInt(qtyInput?.value||'1',10));const stock=Math.max(0,parseInt(opt.dataset.stock||'0',10));if(qtyInput)qtyInput.max=stock;const useQty=Math.min(qty,stock);const price=parseFloat(opt.dataset.price||'0');lines.push(`${opt.dataset.name} x${useQty} @ ${price}`);sum+=useQty*price;});item.value=lines.join('\\n');total.value=sum?String(Math.round(sum*100)/100):'0';}
-                function addOrderRow(){const picker=document.querySelector('[data-order-picker]');const tmpl=document.querySelector('[data-row-template]');if(!picker||!tmpl)return;const rows=picker.querySelectorAll('.order-row');if(rows.length>=5)return;const idx=rows.length;const clone=tmpl.content.firstElementChild.cloneNode(true);const sel=clone.querySelector('select');const qty=clone.querySelector('input');sel.name='orderProduct'+idx;qty.name='orderQty'+idx;picker.appendChild(clone);updateOrderDuplicates();}
-                const CAKE_BASE_PER_KG=3000;
-                function parseKg(text){const m=(text||'').match(/([0-9]+(?:\\.[0-9]+)?)/);return m?parseFloat(m[1]):0;}
-                function syncCake(){const panel=document.querySelector('[data-cake-pricing]');if(!panel)return;const sizeSelect=document.querySelector('select[name="field1"]');const kg=sizeSelect?parseKg(sizeSelect.value):0;let total=kg*CAKE_BASE_PER_KG;panel.querySelectorAll('[data-addon]').forEach(input=>{if(input.checked)total+=parseFloat(input.value||'0');});const out=panel.querySelector('[data-cake-total]');if(out)out.textContent='Rs. '+total.toLocaleString();}
-                document.addEventListener('input',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
-                document.addEventListener('change',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
-                document.addEventListener('click',e=>{if(e.target.matches('[data-add-row]')){e.preventDefault();addOrderRow();}});
-                document.addEventListener('DOMContentLoaded',()=>{syncOrder();updateOrderDuplicates();syncCake();});
-                </script></head><body>%s</body></html>
-                """.formatted(escape(title), "<div class=\"app\">" + sidebar(role) + "<main class=\"content\">" + body + "</main></div>");
+    private static Record findRecord(Module module, String id) throws IOException {
+        String decodedId = decode(id);
+        return readRecords(module).stream().filter(record -> record.id().equals(decodedId)).findFirst().orElse(null);
     }
 
     private static List<String> normalizedValues(Module module, List<String> values) {
@@ -663,18 +917,198 @@ public class BakeryStandaloneServer {
         return normalized;
     }
 
-    private static boolean requireRole(HttpExchange exchange, String role) throws IOException {
-        UserSession session = currentSession(exchange);
-        if (session != null && role.equals(session.role())) {
-            return true;
+    private static void saveRecord(HttpExchange exchange, String role, Module module, Map<String, String> form) throws IOException {
+        if ("customer".equals(role) && !module.customerCanAdd()) {
+            return;
         }
-        redirect(exchange, "/login");
-        return false;
+        if ("customer".equals(role) && ("feedback".equals(module.key()) || "orders".equals(module.key()) || "custom-cakes".equals(module.key()))) {
+            UserSession session = currentSession(exchange);
+            if (session != null) {
+                form.put("field0", session.name());
+            }
+        }
+        List<Record> records = readRecords(module);
+        String id = form.getOrDefault("id", "");
+        if ("customer".equals(role) && !id.isBlank()) {
+            UserSession session = currentSession(exchange);
+            String editId = id;
+            boolean ownsRecord = records.stream()
+                    .anyMatch(record -> record.id().equals(editId)
+                            && session != null
+                            && !record.values().isEmpty()
+                            && record.values().get(0).equalsIgnoreCase(session.name()));
+            if (!ownsRecord) {
+                return;
+            }
+        }
+        boolean creating = id.isBlank();
+        if (creating) {
+            id = module.key().toUpperCase().replace("-", "") + "-" + Instant.now().toEpochMilli();
+        }
+        String finalId = id;
+        records.removeIf(record -> record.id().equals(finalId));
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < module.fields().size(); i++) {
+            values.add(form.getOrDefault("field" + i, ""));
+        }
+        if ("orders".equals(module.key())) {
+            values.set(1, selectedOrderItems(form));
+            values.set(2, calculateOrderTotal(values.get(1)));
+            if (creating) {
+                decreaseSelectedProductStock(form);
+            } else if ("customer".equals(role)) {
+                values.set(3, "Pending");
+            }
+        }
+        applyRecordDefaults(module, values);
+        records.add(new Record(id, values));
+        writeRecords(module, records);
+        if ("users".equals(module.key())) {
+            syncCustomerAccount(values);
+        }
     }
 
-    private static Record findRecord(Module module, String id) throws IOException {
+    private static String selectedOrderItems(Map<String, String> form) throws IOException {
+        StringBuilder items = new StringBuilder();
+        Module productsModule = findModule("products");
+        for (int row = 0; row < 5; row++) {
+            String productId = form.getOrDefault("orderProduct" + row, "");
+            if (productId.isBlank()) {
+                continue;
+            }
+            Record product = findRecord(productsModule, productId);
+            if (product == null) {
+                continue;
+            }
+            List<String> values = normalizedValues(productsModule, product.values());
+            int quantity = Math.min(parsePositiveInt(form.getOrDefault("orderQty" + row, "1")), stockAmount(new Record(product.id(), values)));
+            if (quantity <= 0) {
+                continue;
+            }
+            if (!items.isEmpty()) {
+                items.append(System.lineSeparator());
+            }
+            items.append(orderLine(values.get(0), values.get(2), quantity));
+        }
+        return items.isEmpty() ? form.getOrDefault("field1", "") : items.toString();
+    }
+
+    private static void decreaseSelectedProductStock(Map<String, String> form) throws IOException {
+        Module productsModule = findModule("products");
+        for (int row = 0; row < 5; row++) {
+            String productId = form.getOrDefault("orderProduct" + row, "");
+            if (productId.isBlank()) {
+                continue;
+            }
+            Record product = findRecord(productsModule, productId);
+            if (product == null) {
+                continue;
+            }
+            int quantity = parsePositiveInt(form.getOrDefault("orderQty" + row, "1"));
+            updateProductStock(productId, stockAmount(product) - quantity);
+        }
+    }
+
+    private static void applyRecordDefaults(Module module, List<String> values) {
+        if ("orders".equals(module.key())) {
+            values.set(2, autoTotalAmount(values.get(1), values.get(2)));
+            if (values.get(3).isBlank()) values.set(3, "Pending");
+            if (values.get(4).isBlank()) values.set(4, "Pending Approval");
+            values.set(4, normalizePaymentStatus(values.get(4)));
+        }
+        if ("custom-cakes".equals(module.key()) && values.get(4).isBlank()) {
+            values.set(4, "Pending");
+        }
+        if ("users".equals(module.key()) && values.get(4).isBlank()) {
+            values.set(4, "Active");
+        }
+        if ("products".equals(module.key())) {
+            while (values.size() < 6) {
+                values.add("");
+            }
+            if (values.get(5).isBlank()) {
+                values.set(5, "0");
+            }
+        }
+    }
+
+    private static void syncCustomerAccount(List<String> userValues) throws IOException {
+        if (userValues.size() < 5) {
+            return;
+        }
+        Files.createDirectories(DATA_DIR);
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        List<String> lines = Files.exists(file) ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8)) : new ArrayList<>();
+        String email = userValues.get(1);
+        String tempPassword = userValues.size() > 5 ? userValues.get(5) : "";
+        boolean updated = false;
+        for (int i = 0; i < lines.size(); i++) {
+            String[] parts = lines.get(i).split("\\|", -1);
+            if (parts.length >= 4 && decode(parts[2]).equalsIgnoreCase(email)) {
+                String password = tempPassword.isBlank() ? decode(parts[3]) : tempPassword;
+                lines.set(i, accountLine(
+                        parts.length > 0 ? decode(parts[0]) : "AC-" + Instant.now().toEpochMilli(),
+                        userValues.get(0),
+                        email,
+                        password,
+                        userValues.size() > 2 ? userValues.get(2) : "",
+                        userValues.size() > 3 ? userValues.get(3) : "",
+                        userValues.get(4)));
+                updated = true;
+                break;
+            }
+        }
+        if (!updated) {
+            lines.add(accountLine(
+                    "AC-" + Instant.now().toEpochMilli(),
+                    userValues.get(0),
+                    email,
+                    tempPassword.isBlank() ? "Temp123" : tempPassword,
+                    userValues.size() > 2 ? userValues.get(2) : "",
+                    userValues.size() > 3 ? userValues.get(3) : "",
+                    userValues.get(4)));
+        }
+        Files.write(file, lines, StandardCharsets.UTF_8);
+    }
+
+    private static String accountLine(String id, String name, String email, String password, String phone, String address, String status) {
+        return String.join("|", url(id), url(name), url(email), url(password), url(phone), url(address), url(status));
+    }
+
+    private static void deleteRecord(HttpExchange exchange, String role, Module module, String id) throws IOException {
+        if ("customer".equals(role) && !("orders".equals(module.key()) || "custom-cakes".equals(module.key()))) {
+            return;
+        }
         String decodedId = decode(id);
-        return readRecords(module).stream().filter(record -> record.id().equals(decodedId)).findFirst().orElse(null);
+        List<Record> records = readRecords(module);
+        if ("customer".equals(role)) {
+            UserSession session = currentSession(exchange);
+            records.removeIf(record -> record.id().equals(decodedId)
+                    && session != null
+                    && !record.values().isEmpty()
+                    && record.values().get(0).equalsIgnoreCase(session.name()));
+            writeRecords(module, records);
+            return;
+        }
+        Record removed = records.stream().filter(record -> record.id().equals(decodedId)).findFirst().orElse(null);
+        records.removeIf(record -> record.id().equals(decodedId));
+        writeRecords(module, records);
+        if ("users".equals(module.key()) && removed != null && removed.values().size() > 1) {
+            removeCustomerAccount(removed.values().get(1));
+        }
+    }
+
+    private static void removeCustomerAccount(String email) throws IOException {
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        if (!Files.exists(file) || email == null || email.isBlank()) {
+            return;
+        }
+        List<String> lines = new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8));
+        lines.removeIf(line -> {
+            String[] parts = line.split("\\|", -1);
+            return parts.length >= 3 && decode(parts[2]).equalsIgnoreCase(email);
+        });
+        Files.write(file, lines, StandardCharsets.UTF_8);
     }
 
     private static void writeRecords(Module module, List<Record> records) throws IOException {
@@ -715,6 +1149,35 @@ public class BakeryStandaloneServer {
     private static void redirect(HttpExchange exchange, String location) throws IOException {
         exchange.getResponseHeaders().set("Location", location);
         exchange.sendResponseHeaders(303, -1);
+    }
+
+    private static void notFound(HttpExchange exchange) throws IOException {
+        byte[] bytes = "Not found".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(404, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
+    }
+
+    private static String formatStars(String value) {
+        if (value == null) {
+            return "";
+        }
+        String digits = value.replaceAll("[^0-9]", "");
+        if (digits.isEmpty()) {
+            return value;
+        }
+        int rating;
+        try {
+            rating = Integer.parseInt(digits);
+        } catch (NumberFormatException e) {
+            return value;
+        }
+        rating = Math.max(0, Math.min(5, rating));
+        StringBuilder stars = new StringBuilder();
+        for (int i = 0; i < rating; i++) stars.append("★");
+        for (int i = rating; i < 5; i++) stars.append("☆");
+        stars.append(" (").append(rating).append("/5)");
+        return stars.toString();
     }
 
     private static String escape(String value) {
@@ -845,13 +1308,6 @@ public class BakeryStandaloneServer {
                 default -> "Organized records";
             };
         }
-    }
-
-    private static void notFound(HttpExchange exchange) throws IOException {
-        byte[] bytes = "Not found".getBytes(StandardCharsets.UTF_8);
-        exchange.sendResponseHeaders(404, bytes.length);
-        exchange.getResponseBody().write(bytes);
-        exchange.close();
     }
 
     private record Record(String id, List<String> values) {
@@ -1029,6 +1485,4 @@ public class BakeryStandaloneServer {
             """;
         return html.formatted(orderedMsg, navLinks, userArea, content.toString());
     }
-
-
 }
