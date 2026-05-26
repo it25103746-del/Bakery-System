@@ -378,6 +378,32 @@ public class BakeryStandaloneServer {
         return email != null && email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
     }
 
+    private static String calculateOrderTotal(String orderedItems) {
+        double total = 0;
+        String[] lines = (orderedItems == null ? "" : orderedItems).split("\\R");
+        for (String line : lines) {
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("x(\\d+)\\s*@\\s*(\\d+(?:\\.\\d{1,2})?)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                    .matcher(line);
+            if (matcher.find()) {
+                total += parsePositiveInt(matcher.group(1)) * parseAmount(matcher.group(2));
+            }
+        }
+        if (total == 0) {
+            return "0";
+        }
+        return total == Math.rint(total) ? String.valueOf((long) total) : String.format(java.util.Locale.US, "%.2f", total);
+    }
+
+    private static String numberOnly(String value) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d{1,2})?)").matcher(value == null ? "" : value);
+        String last = "";
+        while (matcher.find()) {
+            last = matcher.group(1);
+        }
+        return last.isBlank() ? "0" : last;
+    }
+
     private static int parsePositiveInt(String value) {
         try {
             return Math.max(1, Integer.parseInt(value == null ? "1" : value.trim()));
@@ -395,6 +421,28 @@ public class BakeryStandaloneServer {
         } catch (NumberFormatException exception) {
             return 0;
         }
+    }
+
+    private static String orderLine(String productName, String price, int quantity) {
+        return productName + " x" + quantity + " @ " + numberOnly(price);
+    }
+
+    private static void updateProductStock(String productId, int stock) throws IOException {
+        Module productsModule = findModule("products");
+        List<Record> products = readRecords(productsModule);
+        for (int i = 0; i < products.size(); i++) {
+            Record product = products.get(i);
+            if (product.id().equals(productId)) {
+                List<String> values = normalizedValues(productsModule, product.values());
+                values.set(5, String.valueOf(Math.max(0, stock)));
+                if (stock <= 0) {
+                    values.set(4, "Unavailable");
+                }
+                products.set(i, new Record(product.id(), values));
+                break;
+            }
+        }
+        writeRecords(productsModule, products);
     }
 
     private static UserSession currentSession(HttpExchange exchange) {
@@ -451,6 +499,11 @@ public class BakeryStandaloneServer {
             }
         }
         return normalized;
+    }
+
+    private static Record findRecord(Module module, String id) throws IOException {
+        String decodedId = decode(id);
+        return readRecords(module).stream().filter(record -> record.id().equals(decodedId)).findFirst().orElse(null);
     }
 
     private static void writeRecords(Module module, List<Record> records) throws IOException {
