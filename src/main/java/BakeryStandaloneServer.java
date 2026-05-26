@@ -375,32 +375,29 @@ public class BakeryStandaloneServer {
         }
         for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
             String[] parts = line.split("\\|", -1);
-            if ("customer".equals(role)
-                    && parts.length >= 4
+            if (parts.length >= 4
                     && decode(parts[2]).equalsIgnoreCase(email)
                     && decode(parts[3]).equals(password)
+                    && role.equals(accountRole(parts))
                     && (parts.length < 7 || "Active".equalsIgnoreCase(decode(parts[6])))) {
-                return "customer";
+                return role;
             }
         }
         return null;
     }
 
     private static String loginName(String role, String email) throws IOException {
-        if ("admin".equals(role)) {
-            return "Admin";
-        }
         Path file = DATA_DIR.resolve(ACCOUNT_FILE);
         if (!Files.exists(file)) {
-            return "Customer";
+            return "admin".equals(role) ? "Admin" : "Customer";
         }
         for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
             String[] parts = line.split("\\|", -1);
-            if (parts.length >= 4 && decode(parts[2]).equalsIgnoreCase(email)) {
+            if (parts.length >= 4 && role.equals(accountRole(parts)) && decode(parts[2]).equalsIgnoreCase(email)) {
                 return decode(parts[1]);
             }
         }
-        return "Customer";
+        return "admin".equals(role) ? "Admin" : "Customer";
     }
 
     private static boolean isValidEmail(String email) {
@@ -628,6 +625,10 @@ public class BakeryStandaloneServer {
             }
             inputs.append(fieldControl(role, module, i, value, record != null));
         }
+        if ("admin".equals(role) && "admins".equals(module.key())) {
+            String adminEmail = values.size() > 1 ? values.get(1) : "";
+            inputs.append(adminPasswordControl(adminEmail));
+        }
         String id = record == null ? "" : record.id();
         String title = record == null ? "Add " + module.singleName() : "Edit " + module.singleName();
         String submitLabel = "orders".equals(module.key()) ? "Order" : "Save";
@@ -710,10 +711,24 @@ public class BakeryStandaloneServer {
                     <label>%s<input name="%s" value="" placeholder="%s"></label>
                     """.formatted(escape(label), fieldName, escape(placeholder));
         }
+        if ("admins".equals(module.key()) && index == 4) {
+            return selectControl(label, fieldName, value.isBlank() ? "Active" : value, List.of("Active", "Expired"));
+        }
         String type = "Pickup Date".equals(label) ? "date" : "text";
         return """
                 <label>%s<input type="%s" name="%s" value="%s" required></label>
                 """.formatted(escape(label), type, fieldName, escape(value));
+    }
+
+    private static String adminPasswordControl(String email) throws IOException {
+        boolean hasExistingLogin = hasAdminLoginAccount(email);
+        String placeholder = hasExistingLogin ? "Leave blank to keep current password" : "Password for admin login";
+        String confirmPlaceholder = hasExistingLogin ? "Confirm new password" : "Confirm password";
+        String required = hasExistingLogin ? "" : " required";
+        return """
+                <label>Password<input type="password" name="password" minlength="6" placeholder="%s"%s oninput="this.form.confirmPassword.setCustomValidity(this.value!==this.form.confirmPassword.value?'Passwords do not match':'')"></label>
+                <label>Confirm Password<input type="password" name="confirmPassword" minlength="6" placeholder="%s"%s oninput="this.setCustomValidity(this.value!==this.form.password.value?'Passwords do not match':'')"></label>
+                """.formatted(escape(placeholder), required, escape(confirmPlaceholder), required);
     }
 
     private static String selectControl(String label, String fieldName, String value, List<String> options) {
@@ -944,11 +959,15 @@ public class BakeryStandaloneServer {
             id = module.key().toUpperCase().replace("-", "") + "-" + Instant.now().toEpochMilli();
         }
         String finalId = id;
-        records.removeIf(record -> record.id().equals(finalId));
+        Record previousRecord = records.stream().filter(record -> record.id().equals(finalId)).findFirst().orElse(null);
         List<String> values = new ArrayList<>();
         for (int i = 0; i < module.fields().size(); i++) {
             values.add(form.getOrDefault("field" + i, ""));
         }
+        if ("admins".equals(module.key()) && !isValidAdminPasswordSubmission(values, form, previousRecord)) {
+            return;
+        }
+        records.removeIf(record -> record.id().equals(finalId));
         if ("orders".equals(module.key())) {
             values.set(1, selectedOrderItems(form));
             values.set(2, calculateOrderTotal(values.get(1)));
@@ -963,6 +982,9 @@ public class BakeryStandaloneServer {
         writeRecords(module, records);
         if ("users".equals(module.key())) {
             syncCustomerAccount(values);
+        }
+        if ("admins".equals(module.key())) {
+            syncAdminAccount(values, form.getOrDefault("password", ""), previousRecord);
         }
     }
 
@@ -1042,7 +1064,7 @@ public class BakeryStandaloneServer {
         boolean updated = false;
         for (int i = 0; i < lines.size(); i++) {
             String[] parts = lines.get(i).split("\\|", -1);
-            if (parts.length >= 4 && decode(parts[2]).equalsIgnoreCase(email)) {
+            if (parts.length >= 4 && "customer".equals(accountRole(parts)) && decode(parts[2]).equalsIgnoreCase(email)) {
                 String password = tempPassword.isBlank() ? decode(parts[3]) : tempPassword;
                 lines.set(i, accountLine(
                         parts.length > 0 ? decode(parts[0]) : "AC-" + Instant.now().toEpochMilli(),
@@ -1069,8 +1091,87 @@ public class BakeryStandaloneServer {
         Files.write(file, lines, StandardCharsets.UTF_8);
     }
 
+    private static void syncAdminAccount(List<String> adminValues, String submittedPassword, Record previousRecord) throws IOException {
+        if (adminValues.size() < 5 || adminValues.get(1).isBlank()) {
+            return;
+        }
+        Files.createDirectories(DATA_DIR);
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        List<String> lines = Files.exists(file) ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8)) : new ArrayList<>();
+        String name = adminValues.get(0);
+        String email = adminValues.get(1);
+        String oldEmail = previousRecord != null && previousRecord.values().size() > 1 ? previousRecord.values().get(1) : email;
+        String accountId = "AA-" + Instant.now().toEpochMilli();
+        String password = submittedPassword;
+        boolean foundAccount = false;
+
+        for (String line : lines) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length >= 4
+                    && "admin".equals(accountRole(parts))
+                    && (decode(parts[2]).equalsIgnoreCase(oldEmail) || decode(parts[2]).equalsIgnoreCase(email))) {
+                foundAccount = true;
+                accountId = decode(parts[0]);
+                if (password.isBlank()) {
+                    password = decode(parts[3]);
+                }
+                break;
+            }
+        }
+
+        if (password.isBlank() && !foundAccount) {
+            return;
+        }
+
+        lines.removeIf(line -> {
+            String[] parts = line.split("\\|", -1);
+            return parts.length >= 3
+                    && "admin".equals(accountRole(parts))
+                    && (decode(parts[2]).equalsIgnoreCase(oldEmail) || decode(parts[2]).equalsIgnoreCase(email));
+        });
+        lines.add(accountLineWithRole(accountId, name, email, password, "", "", adminAccountStatus(adminValues.get(4)), "admin"));
+        Files.write(file, lines, StandardCharsets.UTF_8);
+    }
+
+    private static boolean isValidAdminPasswordSubmission(List<String> adminValues, Map<String, String> form, Record previousRecord) throws IOException {
+        String password = form.getOrDefault("password", "");
+        String confirmPassword = form.getOrDefault("confirmPassword", "");
+        String email = adminValues.size() > 1 ? adminValues.get(1) : "";
+        String oldEmail = previousRecord != null && previousRecord.values().size() > 1 ? previousRecord.values().get(1) : email;
+        boolean hasExistingLogin = hasAdminLoginAccount(oldEmail) || hasAdminLoginAccount(email);
+        if (password.isBlank()) {
+            return hasExistingLogin;
+        }
+        return password.length() >= 6 && password.equals(confirmPassword);
+    }
+
+    private static boolean hasAdminLoginAccount(String email) throws IOException {
+        if (email == null || email.isBlank()) {
+            return false;
+        }
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        if (!Files.exists(file)) {
+            return false;
+        }
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length >= 4 && "admin".equals(accountRole(parts)) && decode(parts[2]).equalsIgnoreCase(email)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String accountLine(String id, String name, String email, String password, String phone, String address, String status) {
         return String.join("|", url(id), url(name), url(email), url(password), url(phone), url(address), url(status));
+    }
+
+    private static String accountLineWithRole(String id, String name, String email, String password, String phone, String address, String status, String role) {
+        return accountLine(id, name, email, password, phone, address, status) + "|" + url(role);
+    }
+
+    private static String adminAccountStatus(String expiryStatus) {
+        return "Active".equalsIgnoreCase(expiryStatus) ? "Active" : "Expired";
     }
 
     private static void deleteRecord(HttpExchange exchange, String role, Module module, String id) throws IOException {
@@ -1094,9 +1195,20 @@ public class BakeryStandaloneServer {
         if ("users".equals(module.key()) && removed != null && removed.values().size() > 1) {
             removeCustomerAccount(removed.values().get(1));
         }
+        if ("admins".equals(module.key()) && removed != null && removed.values().size() > 1) {
+            removeAdminAccount(removed.values().get(1));
+        }
     }
 
     private static void removeCustomerAccount(String email) throws IOException {
+        removeAccount(email, "customer");
+    }
+
+    private static void removeAdminAccount(String email) throws IOException {
+        removeAccount(email, "admin");
+    }
+
+    private static void removeAccount(String email, String role) throws IOException {
         Path file = DATA_DIR.resolve(ACCOUNT_FILE);
         if (!Files.exists(file) || email == null || email.isBlank()) {
             return;
@@ -1104,9 +1216,13 @@ public class BakeryStandaloneServer {
         List<String> lines = new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8));
         lines.removeIf(line -> {
             String[] parts = line.split("\\|", -1);
-            return parts.length >= 3 && decode(parts[2]).equalsIgnoreCase(email);
+            return parts.length >= 3 && role.equals(accountRole(parts)) && decode(parts[2]).equalsIgnoreCase(email);
         });
         Files.write(file, lines, StandardCharsets.UTF_8);
+    }
+
+    private static String accountRole(String[] parts) {
+        return parts.length >= 8 && !decode(parts[7]).isBlank() ? decode(parts[7]) : "customer";
     }
 
     private static void writeRecords(Module module, List<Record> records) throws IOException {
