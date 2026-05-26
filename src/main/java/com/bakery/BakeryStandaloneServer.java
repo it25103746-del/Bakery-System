@@ -1,3 +1,5 @@
+package com.bakery;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -10,6 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class BakeryStandaloneServer {
     private static final Path DATA_DIR = Path.of("data");
@@ -324,8 +333,57 @@ public class BakeryStandaloneServer {
         writeRecords(usersModule, users);
     }
 
+    private static String authenticate(Map<String, String> form) throws IOException {
+        String email = form.getOrDefault("email", "");
+        String password = form.getOrDefault("password", "");
+        String role = form.getOrDefault("role", "customer");
+        if ("admin".equals(role) && "admin@bakery.lk".equalsIgnoreCase(email) && "admin123".equals(password)) {
+            return "admin";
+        }
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        if (!Files.exists(file)) {
+            return null;
+        }
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            String[] parts = line.split("\\|", -1);
+            if ("customer".equals(role)
+                    && parts.length >= 4
+                    && decode(parts[2]).equalsIgnoreCase(email)
+                    && decode(parts[3]).equals(password)
+                    && (parts.length < 7 || "Active".equalsIgnoreCase(decode(parts[6])))) {
+                return "customer";
+            }
+        }
+        return null;
+    }
+
+    private static String loginName(String role, String email) throws IOException {
+        if ("admin".equals(role)) {
+            return "Admin";
+        }
+        Path file = DATA_DIR.resolve(ACCOUNT_FILE);
+        if (!Files.exists(file)) {
+            return "Customer";
+        }
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length >= 4 && decode(parts[2]).equalsIgnoreCase(email)) {
+                return decode(parts[1]);
+            }
+        }
+        return "Customer";
+    }
+
     private static boolean isValidEmail(String email) {
         return email != null && email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+    }
+
+    private static int parsePositiveInt(String value) {
+        try {
+            return Math.max(1, Integer.parseInt(value == null ? "1" : value.trim()));
+        } catch (NumberFormatException exception) {
+            return 1;
+        }
     }
 
     private static int stockAmount(Record product) {
@@ -393,6 +451,18 @@ public class BakeryStandaloneServer {
             }
         }
         return normalized;
+    }
+
+    private static void writeRecords(Module module, List<Record> records) throws IOException {
+        Files.createDirectories(DATA_DIR);
+        List<String> lines = new ArrayList<>();
+        for (Record record : records) {
+            List<String> parts = new ArrayList<>();
+            parts.add(url(record.id()));
+            record.values().forEach(value -> parts.add(url(value)));
+            lines.add(String.join("|", parts));
+        }
+        Files.write(DATA_DIR.resolve(module.fileName()), lines, StandardCharsets.UTF_8);
     }
 
     private static Map<String, String> parseForm(HttpExchange exchange) throws IOException {
