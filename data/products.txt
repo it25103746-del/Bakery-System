@@ -1,0 +1,3 @@
+PR-001|Chocolate+Gateau|Cakes|3500|One+kilogram+chocolate+cake+with+buttercream|Available|10
+PR-002|Vanilla+Cupcake+Box|Cupcakes|1800|Twelve+vanilla+cupcakes+with+custom+toppings|Available|12
+PRODUCTS-1777822574519|Tea+Bun|Bun|120|In+stock|Available|20

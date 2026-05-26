@@ -1,0 +1,2 @@
+AD-001|Nethmi%20Admin|nethmi.admin%40bakery.lk|Stock%20Manager|Cake%20ingredients%20and%20packaging|Active
+AD-002|Ruwan%20Admin|ruwan.admin%40bakery.lk|Report%20Manager|Daily%20sales%20and%20expiry%20records|Expired
