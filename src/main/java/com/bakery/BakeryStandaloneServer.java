@@ -239,6 +239,37 @@ public class BakeryStandaloneServer {
         notFound(exchange);
     }
 
+    private static String adminDashboard() {
+        return appLayout("admin", "Admin Dashboard", """
+                <section class="hero-card"><p>Sweet Crumbs Bakery</p><h1>Admin Dashboard</h1><span>Manage bakery operations from one clean workspace.</span></section>
+                <section class="tile-grid">%s</section>
+                """.formatted(tiles("admin", MODULES)));
+    }
+
+    private static String customerDashboard() {
+        List<Module> customerModules = MODULES.stream().filter(Module::customerAllowed).toList();
+        return appLayout("customer", "Customer Dashboard", """
+                <section class="hero-card"><p>Sweet Crumbs Bakery</p><h1>Customer Dashboard</h1><span>Browse bakery items, place orders, book custom cakes, and share feedback.</span></section>
+                <section class="tile-grid">%s</section>
+                """.formatted(tiles("customer", customerModules)));
+    }
+
+    private static String tiles(String role, List<Module> modules) {
+        StringBuilder cards = new StringBuilder();
+        for (Module module : modules) {
+            cards.append("""
+                    <a class="tile" href="/%s/modules/%s">
+                        <div class="tile-icon">%s</div>
+                        <div class="tile-content">
+                            <strong>%s</strong>
+                            <small>%s</small>
+                        </div>
+                    </a>
+                    """.formatted(role, module.key(), module.iconEmoji(), escape(module.publicTitle()), escape(module.description())));
+        }
+        return cards.toString();
+    }
+
     private static String loginPage(String error) {
         String notice = error.isBlank() ? "" : "<p class=\"error\">" + escape(error) + "</p>";
         return authLayout("Login", """
@@ -378,6 +409,14 @@ public class BakeryStandaloneServer {
         return email != null && email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
     }
 
+    private static String autoTotalAmount(String orderedItem, String fallbackPrice) {
+        String total = calculateOrderTotal(orderedItem);
+        if (!"0".equals(total)) {
+            return total;
+        }
+        return numberOnly(fallbackPrice);
+    }
+
     private static String calculateOrderTotal(String orderedItems) {
         double total = 0;
         String[] lines = (orderedItems == null ? "" : orderedItems).split("\\R");
@@ -402,6 +441,14 @@ public class BakeryStandaloneServer {
             last = matcher.group(1);
         }
         return last.isBlank() ? "0" : last;
+    }
+
+    private static double parseAmount(String value) {
+        try {
+            return Double.parseDouble(numberOnly(value));
+        } catch (NumberFormatException exception) {
+            return 0;
+        }
     }
 
     private static int parsePositiveInt(String value) {
@@ -445,6 +492,97 @@ public class BakeryStandaloneServer {
         writeRecords(productsModule, products);
     }
 
+    private static String recordsPage(HttpExchange exchange, String role, Module module) throws IOException {
+        boolean isFeedback = "feedback".equals(module.key());
+        StringBuilder rows = new StringBuilder();
+        for (Record record : visibleRecords(exchange, role, module)) {
+            rows.append("<tr>");
+            if (!isFeedback) {
+                rows.append("<td>").append(escape(record.id())).append("</td>");
+            }
+            List<String> values = normalizedValues(module, record.values());
+            for (int i = 0; i < module.fields().size(); i++) {
+                String value = i < values.size() ? values.get(i) : "";
+                if (isFeedback && i == 1) {
+                    rows.append("<td class=\"stars\">").append(escape(formatStars(value))).append("</td>");
+                } else {
+                    rows.append("<td>").append(escape(value)).append("</td>");
+                }
+            }
+            rows.append("""
+                    <td class="actions">%s</td></tr>
+                    """.formatted(actionButtons(role, module, record)));
+        }
+
+        StringBuilder headers = new StringBuilder();
+        if (!isFeedback) {
+            headers.append("<th>ID</th>");
+        }
+        module.fields().forEach(field -> headers.append("<th>").append(escape(field)).append("</th>"));
+        headers.append("<th>Actions</th>");
+
+        String body = """
+                <section class="page-title"><div><p>%s</p><h1>%s</h1></div>%s</section>
+                <div style="margin-bottom:12px; font-size:12px; color:var(--primary); font-weight:700; text-transform:uppercase; letter-spacing:1px; display:flex; align-items:center; gap:8px;">
+                    <span style="width:8px; height:8px; background:var(--primary); border-radius:50%%; display:inline-block;"></span>
+                    Sorted by Bubble Sort Algorithm
+                </div>
+                <input id="search" placeholder="Search records" oninput="filterRows(this.value)">
+                <div class="table-scroll"><table><thead><tr>%s</tr></thead><tbody>%s</tbody></table></div>
+                """.formatted(escape(module.description()), escape(module.publicTitle()), addButton(role, module), headers, rows);
+        return appLayout(role, module.publicTitle(), body);
+    }
+
+    private static List<Record> visibleRecords(HttpExchange exchange, String role, Module module) throws IOException {
+        List<Record> records = readRecords(module);
+        List<Record> filtered;
+        if (!"customer".equals(role) || "products".equals(module.key()) || "feedback".equals(module.key())) {
+            filtered = new ArrayList<>(records);
+        } else {
+            UserSession session = currentSession(exchange);
+            if (session == null) {
+                return List.of();
+            }
+            filtered = records.stream()
+                    .filter(record -> !record.values().isEmpty() && record.values().get(0).equalsIgnoreCase(session.name()))
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        }
+
+        // Apply Bubble Sort on the first value (index 0) of the records
+        bubbleSort(filtered);
+        return filtered;
+    }
+
+    private static void bubbleSort(List<Record> list) {
+        int n = list.size();
+        for (int i = 0; i < n - 1; i++) {
+            for (int j = 0; j < n - i - 1; j++) {
+                String val1 = list.get(j).values().isEmpty() ? "" : list.get(j).values().get(0).toLowerCase();
+                String val2 = list.get(j + 1).values().isEmpty() ? "" : list.get(j + 1).values().get(0).toLowerCase();
+                if (val1.compareTo(val2) > 0) {
+                    Record temp = list.get(j);
+                    list.set(j, list.get(j + 1));
+                    list.set(j + 1, temp);
+                }
+            }
+        }
+    }
+
+    private static boolean ownsRecord(HttpExchange exchange, Record record) {
+        UserSession session = currentSession(exchange);
+        return record != null
+                && session != null
+                && !record.values().isEmpty()
+                && record.values().get(0).equalsIgnoreCase(session.name());
+    }
+
+    private static String addButton(String role, Module module) {
+        if ("customer".equals(role) && !module.customerCanAdd()) {
+            return "";
+        }
+        return "<a class=\"button\" href=\"/" + role + "/modules/" + module.key() + "/new\">" + escape(module.createText()) + "</a>";
+    }
+
     private static UserSession currentSession(HttpExchange exchange) {
         String token = sessionToken(exchange);
         return token == null ? null : SESSIONS.get(token);
@@ -486,6 +624,30 @@ public class BakeryStandaloneServer {
         return records;
     }
 
+    private static String appLayout(String role, String title, String body) {
+        return """
+                <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+                <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <title>%s</title><style>
+                :root { --primary: #c25c31; --primary-dark: #91401f; --bg-main: #fcfaf8; --surface: #ffffff; --text-dark: #27211d; --text-muted: #6d625a; --sidebar-bg: #1c1410; --border: #e8dcd0; }
+                body{margin:0;background:var(--bg-main);color:var(--text-dark);font-family:'Inter',sans-serif;font-size:14px;line-height:1.5}.app{min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr)}.sidebar{padding:24px;background:var(--sidebar-bg);color:#fff;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05)}.brand{margin-bottom:32px}.brand b{display:block;font-size:20px;font-weight:800;letter-spacing:-0.5px;color:var(--primary)}.brand span{color:#d9b89b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.8}.nav{display:grid;gap:4px;flex:1}.nav a{padding:10px 16px;border-radius:10px;color:#d9b89b;text-decoration:none;font-weight:600;transition:all 0.2s ease;font-size:13px}.nav a:hover{background:rgba(194,92,49,0.1);color:#fff;transform:translateX(4px)}.signout{margin-top:auto;color:#f6c7b8!important;background:rgba(246,199,184,0.05)}.signout:hover{background:rgba(246,199,184,0.15);color:#fff!important}.content{min-width:0;padding:40px;overflow:auto;height:100vh;box-sizing:border-box}.hero-card,.page-title{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:32px;padding:40px;background:linear-gradient(135deg,rgba(40,25,18,0.95),rgba(194,92,49,0.8)),url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1400&q=80') center/cover;border-radius:20px;color:#fff;box-shadow:0 15px 35px rgba(0,0,0,0.12)}.hero-card h1,.page-title h1{margin:8px 0;font-size:38px;line-height:1.1;letter-spacing:-1.5px;font-weight:800}.hero-card p,.page-title p{margin:0;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:var(--primary)}.hero-card span{font-size:16px;color:rgba(255,255,255,0.9);font-weight:500;max-width:500px}.tile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}.tile{background:white;border:1px solid var(--border);border-radius:18px;padding:28px;text-decoration:none;color:var(--text-dark);display:flex;align-items:center;gap:20px;transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:0 4px 15px rgba(0,0,0,0.02)}.tile:hover{transform:translateY(-6px);box-shadow:0 20px 40px rgba(0,0,0,0.08);border-color:var(--primary)}.tile-icon{width:56px;height:56px;background:rgba(194,92,49,0.1);border-radius:14px;display:grid;place-items:center;font-size:24px;color:var(--primary);flex-shrink:0}.tile-content strong{display:block;font-size:18px;font-weight:700;margin-bottom:4px;letter-spacing:-0.4px}.tile-content small{color:var(--text-muted);font-size:13px;line-height:1.4;display:block}.button,.small,button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 20px;border:0;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;transition:all 0.2s}.button{color:white;background:var(--primary);box-shadow:0 8px 20px rgba(194,92,49,0.2)}.button:hover{background:var(--primary-dark);transform:translateY(-2px);box-shadow:0 12px 25px rgba(194,92,49,0.3)}.small{color:var(--primary);background:rgba(194,92,49,0.08);min-height:36px;padding:0 14px;font-size:12px}.small:hover{background:rgba(194,92,49,0.15)}button{color:white;background:#dc2626;min-height:36px}#search{width:100%%;box-sizing:border-box;min-height:48px;margin-bottom:24px;padding:0 20px;border:1px solid var(--border);border-radius:12px;font:inherit;background:white;transition:all 0.2s}#search:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}table{width:100%%;border-collapse:separate;border-spacing:0;background:white;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.04)}th,td{padding:18px 20px;border-bottom:1px solid var(--border);text-align:left}th{background:#fdfaf7;color:var(--primary);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:1px}tr:hover td{background:#fffbf8}.actions{display:flex;gap:10px}.form-wrap{max-width:800px;margin:0 auto}.form-wrap form{background:white;padding:40px;border-radius:20px;border:1px solid var(--border);box-shadow:0 20px 50px rgba(0,0,0,0.05);display:grid;gap:24px}label{font-weight:700;font-size:14px;color:var(--text-dark);display:grid;gap:8px}input,select,textarea{min-height:48px;padding:0 16px;border:1px solid var(--border);border-radius:10px;font:inherit;background:white;box-sizing:border-box;width:100%%}textarea{min-height:96px;padding:12px 16px}input[readonly],textarea[readonly]{background:#f7f1eb;color:var(--text-muted)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(194,92,49,0.1)}.order-picker{display:grid;gap:10px}.order-row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}.price-panel{background:#fff7ef;border:1px solid #f1d4be;border-radius:14px;padding:18px;display:grid;gap:12px}.price-panel strong{color:var(--primary);font-size:13px;text-transform:uppercase;letter-spacing:1px}.price-grid{display:grid;grid-template-columns:1fr auto;gap:6px 16px;font-size:13px;color:var(--text-muted)}.price-grid span:nth-child(odd){font-weight:600;color:var(--text-dark)}.addons{display:grid;gap:6px;border-top:1px dashed #f1d4be;padding-top:10px}.addon{display:flex!important;align-items:center;gap:8px;font-weight:500;font-size:13px;margin:0}.addon input{min-height:auto!important;width:auto!important;padding:0!important;margin:0;border-radius:4px}.addon em{color:var(--primary);font-style:normal;font-weight:700;font-size:12px}.price-total{font-size:15px;font-weight:700;color:var(--text-dark);border-top:1px solid #f1d4be;padding-top:10px;text-align:right}.stars{color:#f5a623;font-weight:700;letter-spacing:2px;font-size:15px}@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{flex-direction:row;padding:12px 20px;position:sticky;top:0;z-index:100}.nav{display:none}.content{padding:20px}.hero-card{padding:30px;flex-direction:column;align-items:flex-start}.hero-card h1{font-size:30px}.order-row{grid-template-columns:1fr}}
+                </style><script>
+                function filterRows(q){q=q.toLowerCase();document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));}
+                function updateOrderDuplicates(){const selects=document.querySelectorAll('[data-order-product]');const taken=new Set();selects.forEach(s=>{if(s.value)taken.add(s.value);});selects.forEach(s=>{Array.from(s.options).forEach(opt=>{if(!opt.value){opt.disabled=false;return;}opt.disabled=opt.value!==s.value&&taken.has(opt.value);});});}
+                function syncOrder(){const item=document.querySelector('[data-order-item]');const total=document.querySelector('[data-total-amount]');if(!item||!total)return;let lines=[],sum=0;document.querySelectorAll('[data-order-product]').forEach(select=>{const opt=select.selectedOptions[0];if(!opt||!select.value)return;const row=select.closest('.order-row');const qtyInput=row?row.querySelector('input[type="number"]'):null;const qty=Math.max(1,parseInt(qtyInput?.value||'1',10));const stock=Math.max(0,parseInt(opt.dataset.stock||'0',10));if(qtyInput)qtyInput.max=stock;const useQty=Math.min(qty,stock);const price=parseFloat(opt.dataset.price||'0');lines.push(`${opt.dataset.name} x${useQty} @ ${price}`);sum+=useQty*price;});item.value=lines.join('\\n');total.value=sum?String(Math.round(sum*100)/100):'0';}
+                function addOrderRow(){const picker=document.querySelector('[data-order-picker]');const tmpl=document.querySelector('[data-row-template]');if(!picker||!tmpl)return;const rows=picker.querySelectorAll('.order-row');if(rows.length>=5)return;const idx=rows.length;const clone=tmpl.content.firstElementChild.cloneNode(true);const sel=clone.querySelector('select');const qty=clone.querySelector('input');sel.name='orderProduct'+idx;qty.name='orderQty'+idx;picker.appendChild(clone);updateOrderDuplicates();}
+                const CAKE_BASE_PER_KG=3000;
+                function parseKg(text){const m=(text||'').match(/([0-9]+(?:\\.[0-9]+)?)/);return m?parseFloat(m[1]):0;}
+                function syncCake(){const panel=document.querySelector('[data-cake-pricing]');if(!panel)return;const sizeSelect=document.querySelector('select[name="field1"]');const kg=sizeSelect?parseKg(sizeSelect.value):0;let total=kg*CAKE_BASE_PER_KG;panel.querySelectorAll('[data-addon]').forEach(input=>{if(input.checked)total+=parseFloat(input.value||'0');});const out=panel.querySelector('[data-cake-total]');if(out)out.textContent='Rs. '+total.toLocaleString();}
+                document.addEventListener('input',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
+                document.addEventListener('change',e=>{if(e.target.matches('[data-order-product],[data-order-qty]')){syncOrder();updateOrderDuplicates();}if(e.target.matches('[data-addon]')||e.target.name==='field1')syncCake();});
+                document.addEventListener('click',e=>{if(e.target.matches('[data-add-row]')){e.preventDefault();addOrderRow();}});
+                document.addEventListener('DOMContentLoaded',()=>{syncOrder();updateOrderDuplicates();syncCake();});
+                </script></head><body>%s</body></html>
+                """.formatted(escape(title), "<div class=\"app\">" + sidebar(role) + "<main class=\"content\">" + body + "</main></div>");
+    }
+
     private static List<String> normalizedValues(Module module, List<String> values) {
         List<String> normalized = new ArrayList<>(values);
         if ("feedback".equals(module.key()) && normalized.size() > module.fields().size()) {
@@ -499,6 +661,15 @@ public class BakeryStandaloneServer {
             }
         }
         return normalized;
+    }
+
+    private static boolean requireRole(HttpExchange exchange, String role) throws IOException {
+        UserSession session = currentSession(exchange);
+        if (session != null && role.equals(session.role())) {
+            return true;
+        }
+        redirect(exchange, "/login");
+        return false;
     }
 
     private static Record findRecord(Module module, String id) throws IOException {
@@ -558,8 +729,7 @@ public class BakeryStandaloneServer {
         return URLDecoder.decode(value == null ? "" : value, StandardCharsets.UTF_8);
     }
 
-    private record Module(String key, String title, String studentId, String studentName, String createText,
-                          String readText, String updateText, String deleteText, String fileName, List<String> fields) {
+    private record Module(String key, String title, String studentId, String studentName, String createText, String readText, String updateText, String deleteText, String fileName, List<String> fields) {
         String publicTitle() {
             return switch (key) {
                 case "feedback" -> "Customer Feedback";
@@ -571,6 +741,117 @@ public class BakeryStandaloneServer {
                 default -> title;
             };
         }
+
+        String description() {
+            return switch (key) {
+                case "feedback" -> "Review customer ratings, comments, and moderation status.";
+                case "admins" -> "Maintain staff access, stock duties, and operational records.";
+                case "users" -> "Register customers and keep contact profiles up to date.";
+                case "products" -> "Organize bakery items, categories, prices, and availability.";
+                case "orders" -> "Track carts, checkout details, payment, and order progress.";
+                case "custom-cakes" -> "Manage cake sizes, design notes, pickup dates, and booking status.";
+                default -> "Manage bakery records.";
+            };
+        }
+
+        String icon() {
+            return switch (key) {
+                case "feedback" -> "Reviews";
+                case "admins" -> "Admin";
+                case "users" -> "Customers";
+                case "products" -> "Menu";
+                case "orders" -> "Checkout";
+                case "custom-cakes" -> "Cake Studio";
+                default -> "Module";
+            };
+        }
+
+        boolean customerAllowed() {
+            return "feedback".equals(key) || "products".equals(key) || "orders".equals(key) || "custom-cakes".equals(key);
+        }
+
+        boolean customerCanAdd() {
+            return "feedback".equals(key) || "orders".equals(key) || "custom-cakes".equals(key);
+        }
+
+        String singleName() {
+            return switch (key) {
+                case "feedback" -> "Customer Review";
+                case "admins" -> "Staff Member";
+                case "users" -> "Customer";
+                case "products" -> "Menu Item";
+                case "orders" -> "Order";
+                case "custom-cakes" -> "Cake Booking";
+                default -> "Record";
+            };
+        }
+
+        String primaryFeature() {
+            return switch (key) {
+                case "feedback" -> "Customer review capture";
+                case "admins" -> "Staff account setup";
+                case "users" -> "Customer profile registration";
+                case "products" -> "Menu item setup";
+                case "orders" -> "Order placement";
+                case "custom-cakes" -> "Personalized cake booking";
+                default -> "Daily records";
+            };
+        }
+
+        String insightFeature() {
+            return switch (key) {
+                case "feedback" -> "Ratings and comments";
+                case "admins" -> "Operational reports";
+                case "users" -> "Customer profiles";
+                case "products" -> "Menu availability";
+                case "orders" -> "Order history";
+                case "custom-cakes" -> "Design and pickup details";
+                default -> "Record details";
+            };
+        }
+
+        String controlFeature() {
+            return switch (key) {
+                case "feedback" -> "Review moderation";
+                case "admins" -> "Stock responsibility";
+                case "users" -> "Profile maintenance";
+                case "products" -> "Price and detail control";
+                case "orders" -> "Progress tracking";
+                case "custom-cakes" -> "Design adjustments";
+                default -> "Record management";
+            };
+        }
+
+        String iconEmoji() {
+            return switch (key) {
+                case "feedback" -> "\u2B50";
+                case "admins" -> "\uD83D\uDD11";
+                case "users" -> "\uD83D\uDC65";
+                case "products" -> "\uD83C\uDF70";
+                case "orders" -> "\uD83D\uDCE6";
+                case "custom-cakes" -> "\uD83C\uDFA8";
+                default -> "\uD83D\uDCC1";
+            };
+        }
+
+        String cleanupFeature() {
+            return switch (key) {
+                case "feedback" -> "Keep reviews tidy";
+                case "admins" -> "Archive expired access";
+                case "users" -> "Retire inactive profiles";
+                case "products" -> "Remove unavailable items";
+                case "orders" -> "Clear cancelled orders";
+                case "custom-cakes" -> "Clear cancelled bookings";
+                default -> "Organized records";
+            };
+        }
+    }
+
+    private static void notFound(HttpExchange exchange) throws IOException {
+        byte[] bytes = "Not found".getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(404, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 
     private record Record(String id, List<String> values) {
@@ -748,4 +1029,6 @@ public class BakeryStandaloneServer {
             """;
         return html.formatted(orderedMsg, navLinks, userArea, content.toString());
     }
+
+
 }
